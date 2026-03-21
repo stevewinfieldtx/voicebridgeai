@@ -440,6 +440,33 @@ body::before {
     border-color: rgba(255, 255, 255, 0.1);
 }
 
+/* ---- Generic chip IDs: chip-a = blue, chip-b = violet/pink ---- */
+#chip-a.active {
+    border-color: var(--accent-en);
+    box-shadow: 0 0 24px var(--accent-en-glow), inset 0 0 20px var(--accent-en-dim);
+    color: var(--text-primary);
+    background: linear-gradient(135deg, var(--accent-en-dim), transparent 70%);
+}
+#chip-a.active .chip-label { color: var(--accent-en); }
+#chip-a.active .chip-flag  { transform: scale(1.12); }
+
+#chip-b.active {
+    border-color: var(--accent-vi);
+    box-shadow: 0 0 24px var(--accent-vi-glow), inset 0 0 20px var(--accent-vi-dim);
+    color: var(--text-primary);
+    background: linear-gradient(135deg, var(--accent-vi-dim), transparent 70%);
+}
+#chip-b.active .chip-label { color: var(--accent-vi); }
+#chip-b.active .chip-flag  { transform: scale(1.12); }
+
+/* ---- Language selects inside settings panel ---- */
+.settings-lang-select {
+    max-width: 100%;
+    width: 100%;
+    border-radius: var(--radius-sm);
+    margin-top: 8px;
+}
+
 /* =======================================
    TWO-COLUMN CONVERSATION LAYOUT
    ======================================= */

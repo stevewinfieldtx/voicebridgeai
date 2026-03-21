@@ -42,6 +42,7 @@
     let fromCode = 'en';
     let toCode   = 'vi';
     let isListening = false;
+    let isSpeaking  = false;   // true while TTS audio plays — suppresses mic echo
     let recognition = null;
     let ttsUnlocked = false;
     let ttsAudio = null;
@@ -66,7 +67,7 @@
     }
 
     // ---- DOM Elements (populated in init) ----
-    let langFromSelect, langToSelect, langSwapBtn;
+    let langFromSelect, langToSelect, langSwapBtn, chipA, chipB;
     let colFromHeader, colToHeader;
     let feedEl, emptyEl, interimBar, interimText, micBtn, clearBtn, statusText;
     let settingsBtn, settingsOverlay, settingsClose;
@@ -89,6 +90,9 @@
         if (langFromSelect) langFromSelect.value = from;
         if (langToSelect)   langToSelect.value   = to;
 
+        // Update direction chips
+        updateChips();
+
         // Update column headers
         const fromLang = getLang(from);
         const toLang   = getLang(to);
@@ -105,7 +109,18 @@
         }
     }
 
-    // ---- Translation API ----
+    function updateChips() {
+        if (!chipA || !chipB) return;
+        const fromLang = getLang(fromCode);
+        const toLang   = getLang(toCode);
+        document.getElementById('chip-a-flag').textContent  = fromLang.flag;
+        document.getElementById('chip-a-label').textContent = fromLang.name;
+        document.getElementById('chip-b-flag').textContent  = toLang.flag;
+        document.getElementById('chip-b-label').textContent = toLang.name;
+        chipA.classList.add('active');
+        chipB.classList.remove('active');
+    }
+
     async function translateText(text, fromLang, toLang) {
         const pair = `${fromLang.memory}|${toLang.memory}`;
         const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${pair}`;
@@ -131,6 +146,7 @@
     function speak(text, ttsCode) {
         if (ttsAudio) { ttsAudio.pause(); ttsAudio.src = ''; ttsAudio = null; }
         if (window.speechSynthesis) window.speechSynthesis.cancel();
+        isSpeaking = true;
         speakCloudTTS(text, ttsCode);
     }
 
@@ -138,6 +154,7 @@
     function speakCloudTTS(text, ttsCode) {
         const params = new URLSearchParams({ text, lang: ttsCode, rate: voicePrefs.speed });
         ttsAudio = new Audio(`/api/tts?${params}`);
+        ttsAudio.onended = () => { isSpeaking = false; };
         ttsAudio.onerror = () => {
             console.warn('Cloud TTS unavailable, trying Google Translate TTS');
             speakGTTS(text, ttsCode);
@@ -156,7 +173,11 @@
         const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${gttsCode(ttsCode)}&client=gtx`;
         ttsAudio = new Audio(url);
         ttsAudio.playbackRate = voicePrefs.speed;
-        ttsAudio.onerror = () => { console.warn('Google TTS failed, using native'); speakNative(text, ttsCode); };
+        ttsAudio.onended = () => { isSpeaking = false; };
+        ttsAudio.onerror = () => {
+            console.warn('Google TTS failed, using native');
+            speakNative(text, ttsCode);
+        };
         ttsAudio.play().catch(() => speakNative(text, ttsCode));
     }
 
@@ -172,13 +193,15 @@
     }
 
     function speakNative(text, ttsCode) {
-        if (!window.speechSynthesis) return;
+        if (!window.speechSynthesis) { isSpeaking = false; return; }
         const utter = new SpeechSynthesisUtterance(text);
         utter.lang  = ttsCode;
         utter.rate  = voicePrefs.speed;
         utter.pitch = voicePrefs.pitch;
         const voice = getBestVoice(ttsCode);
         if (voice) utter.voice = voice;
+        utter.onend   = () => { isSpeaking = false; };
+        utter.onerror = () => { isSpeaking = false; };
         window.speechSynthesis.speak(utter);
     }
 
@@ -295,6 +318,8 @@
 
         rec.onresult = (event) => {
             if (!isCurrent()) return;
+            // Ignore anything the mic picks up while TTS is playing (echo suppression)
+            if (isSpeaking) return;
 
             let interim = '';
             for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -404,6 +429,8 @@
         langFromSelect = document.getElementById('lang-from');
         langToSelect   = document.getElementById('lang-to');
         langSwapBtn    = document.getElementById('lang-swap');
+        chipA          = document.getElementById('chip-a');
+        chipB          = document.getElementById('chip-b');
         colFromHeader  = document.getElementById('col-from-header');
         colToHeader    = document.getElementById('col-to-header');
 
@@ -468,13 +495,24 @@
             saveLangPair();
         });
 
-        langSwapBtn.addEventListener('click', () => {
+        if (langSwapBtn) langSwapBtn.addEventListener('click', () => {
             setLanguages(toCode, fromCode);
             saveLangPair();
         });
 
         micBtn.addEventListener('click', toggleListening);
         clearBtn.addEventListener('click', clearConversation);
+
+        // Chip-b tap = swap direction (Language B becomes the speaker)
+        if (chipB) chipB.addEventListener('click', () => {
+            setLanguages(toCode, fromCode);
+            saveLangPair();
+        });
+        // Chip-a tap = re-confirm current speaker (pulse animation)
+        if (chipA) chipA.addEventListener('click', () => {
+            chipA.style.transform = 'scale(0.96)';
+            setTimeout(() => { chipA.style.transform = ''; }, 150);
+        });
 
         // Settings events
         settingsBtn.addEventListener('click', openSettings);
