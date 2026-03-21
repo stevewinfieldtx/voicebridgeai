@@ -304,6 +304,8 @@
         rec.continuous = false;   // one utterance per session — avoids result accumulation bug
         rec.maxAlternatives = 1;
 
+        let processed = false;  // guard: only ever translate once per session
+
         rec.onstart = () => {
             if (rec !== recognition) return;
             isListening = true;
@@ -313,8 +315,8 @@
 
         rec.onresult = (event) => {
             if (rec !== recognition) return;
-            // Ignore anything the mic picks up while TTS is playing (echo suppression)
             if (isSpeaking) return;
+            if (processed) return;  // already handled this utterance
 
             let interim = '';
             let finalText = '';
@@ -327,6 +329,7 @@
             if (interim) showInterim(interim);
 
             if (finalText.trim()) {
+                processed = true;   // lock out any further results from this session
                 const text = finalText.trim();
                 hideInterim();
                 setStatus('Translating...');

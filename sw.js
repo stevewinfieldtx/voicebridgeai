@@ -5,7 +5,7 @@
    need network, but the UI is always ready).
    ========================================= */
 
-const CACHE_NAME = 'voicebridge-v3';
+const CACHE_NAME = 'voicebridge-v4';
 const APP_SHELL = [
     './',
     './index.html',
