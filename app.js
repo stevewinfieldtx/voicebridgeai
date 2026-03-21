@@ -297,46 +297,40 @@
         if (!SpeechRecognition) return null;
 
         const fromLang = getLang(fromCode);
-        const toLang   = getLang(toCode);
 
         const rec = new SpeechRecognition();
         rec.lang = fromLang.recognition;
         rec.interimResults = true;
-        rec.continuous = true;
+        rec.continuous = false;   // one utterance per session — avoids result accumulation bug
         rec.maxAlternatives = 1;
 
-        let finalTranscript = '';
-        const isCurrent = () => rec === recognition;
-
         rec.onstart = () => {
-            if (!isCurrent()) return;
+            if (rec !== recognition) return;
             isListening = true;
             micBtn.classList.add('active');
             setStatus('Listening...');
-            finalTranscript = '';
         };
 
         rec.onresult = (event) => {
-            if (!isCurrent()) return;
+            if (rec !== recognition) return;
             // Ignore anything the mic picks up while TTS is playing (echo suppression)
             if (isSpeaking) return;
 
             let interim = '';
+            let finalText = '';
             for (let i = event.resultIndex; i < event.results.length; i++) {
                 const t = event.results[i][0].transcript;
-                if (event.results[i].isFinal) finalTranscript += t;
+                if (event.results[i].isFinal) finalText += t;
                 else interim += t;
             }
 
             if (interim) showInterim(interim);
 
-            if (finalTranscript.trim()) {
-                const text = finalTranscript.trim();
-                finalTranscript = '';
+            if (finalText.trim()) {
+                const text = finalText.trim();
                 hideInterim();
                 setStatus('Translating...');
 
-                // Snapshot the current pair at the time the utterance is processed
                 const snapFrom = getLang(fromCode);
                 const snapTo   = getLang(toCode);
 
@@ -349,7 +343,7 @@
         };
 
         rec.onerror = (event) => {
-            if (!isCurrent()) return;
+            if (rec !== recognition) return;
             console.warn('Recognition error:', event.error);
             if (event.error === 'not-allowed') {
                 setStatus('⚠ Mic denied');
@@ -360,9 +354,13 @@
         };
 
         rec.onend = () => {
-            if (!isCurrent()) return;
+            if (rec !== recognition) return;
             if (isListening) {
-                try { rec.start(); } catch (e) { /* already started */ }
+                // Fresh instance each time — prevents Chrome replaying accumulated results
+                recognition = createRecognition();
+                if (recognition) {
+                    try { recognition.start(); } catch (e) { /* ok */ }
+                }
             } else {
                 micBtn.classList.remove('active');
                 setStatus('Ready');
