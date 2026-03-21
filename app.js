@@ -1,6 +1,5 @@
 /* =========================================
-   VoiceBridge — Two-Column Split Layout
-   English always left, Vietnamese always right
+   VoiceBridge — Multi-Language Edition
    ========================================= */
 
 (function () {
@@ -12,11 +11,39 @@
         document.getElementById('browser-warning').style.display = 'flex';
     }
 
+    // ---- Language Catalog ----
+    // recognition: BCP-47 tag for Web Speech API
+    // tts:         BCP-47 tag for speechSynthesis
+    // memory:      langpair code for MyMemory API
+    const LANGS = [
+        { code: 'en',  name: 'English',    flag: '🇺🇸', recognition: 'en-US', tts: 'en-US', memory: 'en' },
+        { code: 'vi',  name: 'Tiếng Việt', flag: '🇻🇳', recognition: 'vi-VN', tts: 'vi-VN', memory: 'vi' },
+        { code: 'es',  name: 'Español',    flag: '🇪🇸', recognition: 'es-ES', tts: 'es-ES', memory: 'es' },
+        { code: 'fr',  name: 'Français',   flag: '🇫🇷', recognition: 'fr-FR', tts: 'fr-FR', memory: 'fr' },
+        { code: 'de',  name: 'Deutsch',    flag: '🇩🇪', recognition: 'de-DE', tts: 'de-DE', memory: 'de' },
+        { code: 'it',  name: 'Italiano',   flag: '🇮🇹', recognition: 'it-IT', tts: 'it-IT', memory: 'it' },
+        { code: 'pt',  name: 'Português',  flag: '🇧🇷', recognition: 'pt-BR', tts: 'pt-BR', memory: 'pt' },
+        { code: 'nl',  name: 'Nederlands', flag: '🇳🇱', recognition: 'nl-NL', tts: 'nl-NL', memory: 'nl' },
+        { code: 'ru',  name: 'Русский',    flag: '🇷🇺', recognition: 'ru-RU', tts: 'ru-RU', memory: 'ru' },
+        { code: 'uk',  name: 'Українська', flag: '🇺🇦', recognition: 'uk-UA', tts: 'uk-UA', memory: 'uk' },
+        { code: 'ar',  name: 'العربية',    flag: '🇸🇦', recognition: 'ar-SA', tts: 'ar-SA', memory: 'ar' },
+        { code: 'hi',  name: 'हिन्दी',     flag: '🇮🇳', recognition: 'hi-IN', tts: 'hi-IN', memory: 'hi' },
+        { code: 'zh',  name: '中文',        flag: '🇨🇳', recognition: 'zh-CN', tts: 'zh-CN', memory: 'zh-CN' },
+        { code: 'ja',  name: '日本語',      flag: '🇯🇵', recognition: 'ja-JP', tts: 'ja-JP', memory: 'ja' },
+        { code: 'ko',  name: '한국어',      flag: '🇰🇷', recognition: 'ko-KR', tts: 'ko-KR', memory: 'ko' },
+        { code: 'th',  name: 'ภาษาไทย',    flag: '🇹🇭', recognition: 'th-TH', tts: 'th-TH', memory: 'th' },
+    ];
+
+    function getLang(code) {
+        return LANGS.find(l => l.code === code) || LANGS[0];
+    }
+
     // ---- State ----
-    let direction = 'en-vi'; // 'en-vi' or 'vi-en'
+    let fromCode = 'en';
+    let toCode   = 'vi';
     let isListening = false;
     let recognition = null;
-    let ttsUnlocked = false; // iOS Safari requires TTS to be triggered from a user gesture first
+    let ttsUnlocked = false;
 
     // ---- Voice Settings State ----
     const voicePrefs = loadVoicePrefs();
@@ -25,13 +52,11 @@
         try {
             const saved = JSON.parse(localStorage.getItem('vb-voice-prefs'));
             return {
-                enVoiceName: saved?.enVoiceName || '',
-                viVoiceName: saved?.viVoiceName || '',
                 speed: saved?.speed ?? 0.92,
                 pitch: saved?.pitch ?? 1,
             };
         } catch {
-            return { enVoiceName: '', viVoiceName: '', speed: 0.92, pitch: 1 };
+            return { speed: 0.92, pitch: 1 };
         }
     }
 
@@ -40,73 +65,49 @@
     }
 
     // ---- DOM Elements (populated in init) ----
-    let chipEn, chipVi, feedEl, emptyEl, interimBar, interimText, micBtn, clearBtn, statusText;
-
-    // Settings DOM
+    let langFromSelect, langToSelect, langSwapBtn;
+    let colFromHeader, colToHeader;
+    let feedEl, emptyEl, interimBar, interimText, micBtn, clearBtn, statusText;
     let settingsBtn, settingsOverlay, settingsClose;
-    let voiceEnSelect, voiceViSelect, previewEnBtn, previewViBtn;
     let speedSlider, pitchSlider, speedValue, pitchValue;
 
-    // ---- Direction Config ----
-    const configs = {
-        'en-vi': {
-            recognitionLang: 'en-US',
-            sourceLang: 'en',
-            targetLang: 'vi',
-            sourceLabel: 'English',
-            targetLabel: 'Tiếng Việt',
-            sourceFlag: '🇺🇸',
-            targetFlag: '🇻🇳',
-        },
-        'vi-en': {
-            recognitionLang: 'vi-VN',
-            sourceLang: 'vi',
-            targetLang: 'en',
-            sourceLabel: 'Tiếng Việt',
-            targetLabel: 'English',
-            sourceFlag: '🇻🇳',
-            targetFlag: '🇺🇸',
-        },
-    };
-
-    function getConfig() {
-        return configs[direction];
-    }
-
-    // ---- Direction Toggle ----
-    function setDirection(dir) {
-        direction = dir;
-
-        // Swap active class between chips
-        if (dir === 'en-vi') {
-            chipEn.classList.add('active');
-            chipVi.classList.remove('active');
-        } else {
-            chipVi.classList.add('active');
-            chipEn.classList.remove('active');
+    // ---- Language Setup ----
+    function setLanguages(from, to) {
+        // Prevent same language on both sides
+        if (from === to) {
+            // Swap the other side to something different
+            const fallback = LANGS.find(l => l.code !== from);
+            if (from === fromCode) to = fallback.code;
+            else from = fallback.code;
         }
 
-        // Toggle body class for CSS colors
-        document.body.classList.toggle('dir-vi', dir === 'vi-en');
+        fromCode = from;
+        toCode   = to;
 
-        // If currently listening, tear down old instance and restart fresh
+        // Sync selects
+        if (langFromSelect) langFromSelect.value = from;
+        if (langToSelect)   langToSelect.value   = to;
+
+        // Update column headers
+        const fromLang = getLang(from);
+        const toLang   = getLang(to);
+        if (colFromHeader) colFromHeader.textContent = `${fromLang.flag} ${fromLang.name}`;
+        if (colToHeader)   colToHeader.textContent   = `${toLang.flag} ${toLang.name}`;
+
+        // Restart recognition if listening
         if (isListening) {
             const old = recognition;
             recognition = null;
             isListening = false;
             if (old) { try { old.abort(); } catch (e) { /* ok */ } }
-
             setTimeout(() => startListening(), 350);
         }
     }
 
-    function swapDirection() {
-        setDirection(direction === 'en-vi' ? 'vi-en' : 'en-vi');
-    }
-
     // ---- Translation API ----
     async function translateText(text, fromLang, toLang) {
-        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${fromLang}|${toLang}`;
+        const pair = `${fromLang.memory}|${toLang.memory}`;
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${pair}`;
         try {
             const res = await fetch(url);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -121,85 +122,35 @@
         }
     }
 
-    // ---- Text-to-Speech (voice-aware) ----
-    function getSelectedVoice(lang) {
+    // ---- Text-to-Speech ----
+    function getBestVoice(ttsCode) {
         const voices = window.speechSynthesis.getVoices();
-        const prefName = lang === 'vi' ? voicePrefs.viVoiceName : voicePrefs.enVoiceName;
-
-        // Try exact match by name
-        if (prefName) {
-            const exact = voices.find(v => v.name === prefName);
-            if (exact) return exact;
-        }
-
-        // Fallback: first voice that matches language
-        const langCode = lang === 'vi' ? 'vi' : 'en';
-        return voices.find(v => v.lang.startsWith(langCode)) || null;
+        // Prefer exact lang match, then prefix match
+        return (
+            voices.find(v => v.lang === ttsCode) ||
+            voices.find(v => v.lang.startsWith(ttsCode.slice(0, 2))) ||
+            null
+        );
     }
 
-    function speak(text, lang) {
+    function speak(text, ttsCode) {
         if (!window.speechSynthesis) return;
         window.speechSynthesis.cancel();
-
         const utter = new SpeechSynthesisUtterance(text);
-        utter.lang = lang === 'vi' ? 'vi-VN' : 'en-US';
-        utter.rate = voicePrefs.speed;
+        utter.lang  = ttsCode;
+        utter.rate  = voicePrefs.speed;
         utter.pitch = voicePrefs.pitch;
-
-        const voice = getSelectedVoice(lang);
+        const voice = getBestVoice(ttsCode);
         if (voice) utter.voice = voice;
-
         window.speechSynthesis.speak(utter);
     }
 
     // ---- Voice Settings Panel ----
-    function populateVoiceDropdowns() {
-        const voices = window.speechSynthesis.getVoices();
-
-        // Categorize voices
-        const enVoices = voices.filter(v => v.lang.startsWith('en'));
-        const viVoices = voices.filter(v => v.lang.startsWith('vi'));
-
-        fillSelect(voiceEnSelect, enVoices, voicePrefs.enVoiceName, 'English');
-        fillSelect(voiceViSelect, viVoices, voicePrefs.viVoiceName, 'Vietnamese');
-    }
-
-    function fillSelect(selectEl, voices, savedName, langLabel) {
-        selectEl.innerHTML = '';
-
-        if (voices.length === 0) {
-            const opt = document.createElement('option');
-            opt.textContent = `No ${langLabel} voices available`;
-            opt.disabled = true;
-            selectEl.appendChild(opt);
-            return;
-        }
-
-        voices.forEach(v => {
-            const opt = document.createElement('option');
-            // Build a friendly label: name + (local/remote indicator)
-            let label = v.name;
-            if (v.localService === false) label += ' ☁️';
-            opt.value = v.name;
-            opt.textContent = label;
-            if (v.name === savedName) opt.selected = true;
-            selectEl.appendChild(opt);
-        });
-
-        // If nothing was pre-selected, select first
-        if (!savedName || !voices.find(v => v.name === savedName)) {
-            selectEl.selectedIndex = 0;
-        }
-    }
-
     function openSettings() {
-        populateVoiceDropdowns();
-        // Sync slider values
         speedSlider.value = voicePrefs.speed;
         pitchSlider.value = voicePrefs.pitch;
         speedValue.textContent = voicePrefs.speed.toFixed(2) + '×';
         pitchValue.textContent = voicePrefs.pitch.toFixed(1);
-
         settingsOverlay.classList.add('open');
     }
 
@@ -207,29 +158,16 @@
         settingsOverlay.classList.remove('open');
     }
 
-    function previewVoice(lang) {
-        const sampleText = lang === 'vi'
-            ? 'Xin chào, tôi là trợ lý giọng nói của bạn.'
-            : 'Hello, I am your voice assistant.';
-        speak(sampleText, lang);
-    }
-
     // ---- Preload voices ----
     if (window.speechSynthesis) {
         window.speechSynthesis.getVoices();
         window.speechSynthesis.onvoiceschanged = () => {
             window.speechSynthesis.getVoices();
-            // Re-populate if settings is open
-            if (settingsOverlay && settingsOverlay.classList.contains('open')) {
-                populateVoiceDropdowns();
-            }
         };
     }
 
     // ---- UI Helpers ----
-    function setStatus(text) {
-        statusText.textContent = text;
-    }
+    function setStatus(text) { statusText.textContent = text; }
 
     function showInterim(text) {
         interimBar.style.display = 'flex';
@@ -245,10 +183,8 @@
         if (emptyEl) emptyEl.style.display = 'none';
     }
 
-    function scrollToBottom() {
-        requestAnimationFrame(() => {
-            feedEl.scrollTop = feedEl.scrollHeight;
-        });
+    function scrollToTop() {
+        requestAnimationFrame(() => { feedEl.scrollTop = 0; });
     }
 
     function escapeHtml(str) {
@@ -259,39 +195,23 @@
 
     /**
      * Two-column message layout.
-     * English text ALWAYS goes in the left cell.
-     * Vietnamese text ALWAYS goes in the right cell.
+     * Left column = "from" language (source), Right column = "to" language (translation).
+     * Each row shows both; speak button plays the translation.
      */
-    function addMessage(sourceText, translatedText, cfg) {
+    function addMessage(sourceText, translatedText, fromLang, toLang) {
         hideEmptyState();
-
-        let enText, viText;
-        let enIsSource, viIsSource;
-
-        if (cfg.sourceLang === 'en') {
-            enText = sourceText;
-            viText = translatedText;
-            enIsSource = true;
-            viIsSource = false;
-        } else {
-            viText = sourceText;
-            enText = translatedText;
-            viIsSource = true;
-            enIsSource = false;
-        }
 
         const row = document.createElement('div');
         row.className = 'msg-row';
 
-        const enCell = document.createElement('div');
-        enCell.className = `msg-cell col-en ${enIsSource ? 'is-source' : 'is-translation'}`;
-        enCell.innerHTML = escapeHtml(enText);
+        const fromCell = document.createElement('div');
+        fromCell.className = 'msg-cell col-en is-source';
+        fromCell.innerHTML = escapeHtml(sourceText);
 
-        const viCell = document.createElement('div');
-        viCell.className = `msg-cell col-vi ${viIsSource ? 'is-source' : 'is-translation'}`;
-        viCell.innerHTML = escapeHtml(viText);
+        const toCell = document.createElement('div');
+        toCell.className = 'msg-cell col-vi is-translation';
+        toCell.innerHTML = escapeHtml(translatedText);
 
-        const translationCell = enIsSource ? viCell : enCell;
         const speakerHTML = `
             <button class="speak-btn" aria-label="Listen" title="Listen">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
@@ -299,32 +219,33 @@
                 </svg>
             </button>
         `;
-        translationCell.innerHTML += speakerHTML;
+        toCell.innerHTML += speakerHTML;
 
-        row.appendChild(enCell);
-        row.appendChild(viCell);
+        row.appendChild(fromCell);
+        row.appendChild(toCell);
 
         row.querySelector('.speak-btn').addEventListener('click', () => {
-            speak(translatedText, cfg.targetLang);
+            speak(translatedText, toLang.tts);
         });
 
-        feedEl.appendChild(row);
-        scrollToBottom();
+        feedEl.prepend(row);
+        scrollToTop();
     }
 
     // ---- Speech Recognition ----
     function createRecognition() {
         if (!SpeechRecognition) return null;
 
-        const cfg = getConfig();
+        const fromLang = getLang(fromCode);
+        const toLang   = getLang(toCode);
+
         const rec = new SpeechRecognition();
-        rec.lang = cfg.recognitionLang;
+        rec.lang = fromLang.recognition;
         rec.interimResults = true;
         rec.continuous = true;
         rec.maxAlternatives = 1;
 
         let finalTranscript = '';
-
         const isCurrent = () => rec === recognition;
 
         rec.onstart = () => {
@@ -341,16 +262,11 @@
             let interim = '';
             for (let i = event.resultIndex; i < event.results.length; i++) {
                 const t = event.results[i][0].transcript;
-                if (event.results[i].isFinal) {
-                    finalTranscript += t;
-                } else {
-                    interim += t;
-                }
+                if (event.results[i].isFinal) finalTranscript += t;
+                else interim += t;
             }
 
-            if (interim) {
-                showInterim(interim);
-            }
+            if (interim) showInterim(interim);
 
             if (finalTranscript.trim()) {
                 const text = finalTranscript.trim();
@@ -358,14 +274,15 @@
                 hideInterim();
                 setStatus('Translating...');
 
-                const cfgSnapshot = getConfig();
-                translateText(text, cfgSnapshot.sourceLang, cfgSnapshot.targetLang)
-                    .then((translated) => {
-                        addMessage(text, translated, cfgSnapshot);
-                        speak(translated, cfgSnapshot.targetLang);
-                        if (isListening) setStatus('Listening...');
-                        else setStatus('Ready');
-                    });
+                // Snapshot the current pair at the time the utterance is processed
+                const snapFrom = getLang(fromCode);
+                const snapTo   = getLang(toCode);
+
+                translateText(text, snapFrom, snapTo).then((translated) => {
+                    addMessage(text, translated, snapFrom, snapTo);
+                    speak(translated, snapTo.tts);
+                    setStatus(isListening ? 'Listening...' : 'Ready');
+                });
             }
         };
 
@@ -382,7 +299,6 @@
 
         rec.onend = () => {
             if (!isCurrent()) return;
-
             if (isListening) {
                 try { rec.start(); } catch (e) { /* already started */ }
             } else {
@@ -399,11 +315,7 @@
         if (isListening) return;
         recognition = createRecognition();
         if (!recognition) return;
-        try {
-            recognition.start();
-        } catch (e) {
-            console.warn('Could not start:', e);
-        }
+        try { recognition.start(); } catch (e) { console.warn('Could not start:', e); }
     }
 
     function stopListening() {
@@ -419,8 +331,6 @@
     }
 
     // ---- iOS TTS Unlock ----
-    // iOS Safari blocks speechSynthesis.speak() called from async callbacks.
-    // Firing a silent utterance on the first user tap unlocks it for the session.
     function unlockTTS() {
         if (ttsUnlocked || !window.speechSynthesis) return;
         ttsUnlocked = true;
@@ -430,7 +340,7 @@
     }
 
     function toggleListening() {
-        unlockTTS(); // must be called synchronously inside a user gesture
+        unlockTTS();
         if (isListening) stopListening();
         else startListening();
     }
@@ -441,45 +351,91 @@
         if (emptyEl) emptyEl.style.display = '';
     }
 
+    // ---- Populate Language Selects ----
+    function buildLangOptions(selectEl) {
+        selectEl.innerHTML = '';
+        LANGS.forEach(lang => {
+            const opt = document.createElement('option');
+            opt.value = lang.code;
+            opt.textContent = `${lang.flag} ${lang.name}`;
+            selectEl.appendChild(opt);
+        });
+    }
+
     // ---- Init ----
     function init() {
-        chipEn = document.getElementById('chip-en');
-        chipVi = document.getElementById('chip-vi');
-        feedEl = document.getElementById('conversation-feed');
-        emptyEl = document.getElementById('empty-state');
+        langFromSelect = document.getElementById('lang-from');
+        langToSelect   = document.getElementById('lang-to');
+        langSwapBtn    = document.getElementById('lang-swap');
+        colFromHeader  = document.getElementById('col-from-header');
+        colToHeader    = document.getElementById('col-to-header');
+
+        feedEl     = document.getElementById('conversation-feed');
+        emptyEl    = document.getElementById('empty-state');
         interimBar = document.getElementById('interim-bar');
         interimText = document.getElementById('interim-text');
-        micBtn = document.getElementById('mic-btn');
-        clearBtn = document.getElementById('clear-btn');
+        micBtn     = document.getElementById('mic-btn');
+        clearBtn   = document.getElementById('clear-btn');
         statusText = document.getElementById('status-text');
 
         // Settings DOM
-        settingsBtn = document.getElementById('settings-btn');
+        settingsBtn     = document.getElementById('settings-btn');
         settingsOverlay = document.getElementById('settings-overlay');
-        settingsClose = document.getElementById('settings-close');
-        voiceEnSelect = document.getElementById('voice-en');
-        voiceViSelect = document.getElementById('voice-vi');
-        previewEnBtn = document.getElementById('preview-en');
-        previewViBtn = document.getElementById('preview-vi');
-        speedSlider = document.getElementById('voice-speed');
-        pitchSlider = document.getElementById('voice-pitch');
-        speedValue = document.getElementById('speed-value');
-        pitchValue = document.getElementById('pitch-value');
+        settingsClose   = document.getElementById('settings-close');
+        speedSlider     = document.getElementById('voice-speed');
+        pitchSlider     = document.getElementById('voice-pitch');
+        speedValue      = document.getElementById('speed-value');
+        pitchValue      = document.getElementById('pitch-value');
 
         // QR Share DOM
-        const shareBtn   = document.getElementById('share-btn');
-        const qrOverlay  = document.getElementById('qr-overlay');
-        const qrClose    = document.getElementById('qr-close');
-        const openQR  = () => qrOverlay.classList.add('open');
-        const closeQR = () => qrOverlay.classList.remove('open');
+        const shareBtn  = document.getElementById('share-btn');
+        const qrOverlay = document.getElementById('qr-overlay');
+        const qrClose   = document.getElementById('qr-close');
+        const openQR    = () => qrOverlay.classList.add('open');
+        const closeQR   = () => qrOverlay.classList.remove('open');
         shareBtn.addEventListener('click', openQR);
         qrClose.addEventListener('click', closeQR);
         qrOverlay.addEventListener('click', (e) => { if (e.target === qrOverlay) closeQR(); });
 
-        setDirection('en-vi');
+        // Build language dropdowns
+        buildLangOptions(langFromSelect);
+        buildLangOptions(langToSelect);
 
-        chipEn.addEventListener('click', () => setDirection('en-vi'));
-        chipVi.addEventListener('click', () => setDirection('vi-en'));
+        // Set initial languages (restore from localStorage if available)
+        const saved = JSON.parse(localStorage.getItem('vb-lang-pair') || 'null');
+        const initFrom = saved?.from || 'en';
+        const initTo   = saved?.to   || 'vi';
+        setLanguages(initFrom, initTo);
+
+        // Language select events
+        langFromSelect.addEventListener('change', () => {
+            let newFrom = langFromSelect.value;
+            // If same as toCode, automatically swap to
+            if (newFrom === toCode) {
+                const swap = fromCode; // use the old fromCode as the new to
+                setLanguages(newFrom, swap);
+            } else {
+                setLanguages(newFrom, toCode);
+            }
+            saveLangPair();
+        });
+
+        langToSelect.addEventListener('change', () => {
+            let newTo = langToSelect.value;
+            if (newTo === fromCode) {
+                const swap = toCode; // use the old toCode as the new from
+                setLanguages(swap, newTo);
+            } else {
+                setLanguages(fromCode, newTo);
+            }
+            saveLangPair();
+        });
+
+        langSwapBtn.addEventListener('click', () => {
+            setLanguages(toCode, fromCode);
+            saveLangPair();
+        });
+
         micBtn.addEventListener('click', toggleListening);
         clearBtn.addEventListener('click', clearConversation);
 
@@ -489,20 +445,6 @@
         settingsOverlay.addEventListener('click', (e) => {
             if (e.target === settingsOverlay) closeSettings();
         });
-
-        // Voice selection changes
-        voiceEnSelect.addEventListener('change', () => {
-            voicePrefs.enVoiceName = voiceEnSelect.value;
-            saveVoicePrefs();
-        });
-        voiceViSelect.addEventListener('change', () => {
-            voicePrefs.viVoiceName = voiceViSelect.value;
-            saveVoicePrefs();
-        });
-
-        // Preview buttons
-        previewEnBtn.addEventListener('click', () => previewVoice('en'));
-        previewViBtn.addEventListener('click', () => previewVoice('vi'));
 
         // Sliders
         speedSlider.addEventListener('input', () => {
@@ -516,7 +458,7 @@
             saveVoicePrefs();
         });
 
-        // Keyboard: Space = toggle mic, Tab = swap direction, Escape = close settings
+        // Keyboard: Space = toggle mic, Tab = swap languages, Escape = close panels
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
 
@@ -530,9 +472,14 @@
             }
             if (e.key === 'Tab') {
                 e.preventDefault();
-                swapDirection();
+                setLanguages(toCode, fromCode);
+                saveLangPair();
             }
         });
+    }
+
+    function saveLangPair() {
+        localStorage.setItem('vb-lang-pair', JSON.stringify({ from: fromCode, to: toCode }));
     }
 
     if (document.readyState === 'loading') {

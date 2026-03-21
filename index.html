@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VoiceBridge — English ↔ Vietnamese Translator</title>
-    <meta name="description" content="Real-time voice translator between English and Vietnamese. Speak naturally and hear the translation instantly.">
+    <title>VoiceBridge — Real-time Voice Translator</title>
+    <meta name="description" content="Real-time voice translator supporting 16 languages. Speak naturally and hear the translation instantly.">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -54,7 +54,7 @@
                     </button>
                 </div>
             </div>
-            <p class="tagline">Tap language to speak • Mic to start/stop</p>
+            <p class="tagline">Select languages • Tap mic to start • Tab to swap</p>
         </header>
 
         <!-- Settings Panel -->
@@ -69,36 +69,16 @@
                     </button>
                 </div>
 
-                <!-- English Voice -->
+                <!-- Voice note -->
                 <div class="voice-group">
                     <div class="voice-group-label">
-                        <span class="voice-flag">🇺🇸</span>
-                        <span>English Voice</span>
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="opacity:0.5">
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                        <span>Voice</span>
                     </div>
-                    <div class="voice-select-row">
-                        <select id="voice-en" class="voice-select"></select>
-                        <button class="voice-preview" id="preview-en" aria-label="Preview English voice" title="Preview">
-                            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                                <path d="M8 5v14l11-7z"/>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Vietnamese Voice -->
-                <div class="voice-group">
-                    <div class="voice-group-label">
-                        <span class="voice-flag">🇻🇳</span>
-                        <span>Vietnamese Voice</span>
-                    </div>
-                    <div class="voice-select-row">
-                        <select id="voice-vi" class="voice-select"></select>
-                        <button class="voice-preview" id="preview-vi" aria-label="Preview Vietnamese voice" title="Preview">
-                            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                                <path d="M8 5v14l11-7z"/>
-                            </svg>
-                        </button>
-                    </div>
+                    <p class="settings-note" style="margin:0">Best available voice auto-selected per language by your browser.</p>
                 </div>
 
                 <!-- Speech Rate -->
@@ -137,28 +117,23 @@
             <span>Speech recognition requires <strong>Chrome</strong> or <strong>Edge</strong>.</span>
         </div>
 
-        <!-- Direction Toggle -->
-        <div class="direction-bar" id="direction-toggle">
-            <button class="lang-chip lang-en active" id="chip-en" aria-label="English">
-                <span class="chip-flag">🇺🇸</span>
-                <span class="chip-label">English</span>
+        <!-- Language Selector Bar -->
+        <div class="lang-bar">
+            <select id="lang-from" class="lang-select" aria-label="Speak language"></select>
+            <button id="lang-swap" class="lang-swap-btn" aria-label="Swap languages" title="Swap (Tab)">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                    <path d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/>
+                </svg>
             </button>
-            <button class="lang-chip lang-vi" id="chip-vi" aria-label="Tiếng Việt">
-                <span class="chip-flag">🇻🇳</span>
-                <span class="chip-label">Tiếng Việt</span>
-            </button>
+            <select id="lang-to" class="lang-select" aria-label="Translation language"></select>
         </div>
 
         <!-- Two-Column Conversation Feed -->
         <main class="conversation-area" id="conversation-area">
-            <!-- Column Headers -->
+            <!-- Column Headers (updated dynamically by JS) -->
             <div class="col-headers">
-                <div class="col-header col-header-en">
-                    <span class="col-flag">🇺🇸</span> English
-                </div>
-                <div class="col-header col-header-vi">
-                    <span class="col-flag">🇻🇳</span> Tiếng Việt
-                </div>
+                <div class="col-header col-header-en" id="col-from-header">🇺🇸 English</div>
+                <div class="col-header col-header-vi" id="col-to-header">🇻🇳 Tiếng Việt</div>
             </div>
 
             <!-- Scrollable Feed -->
@@ -251,7 +226,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=5"></script>
+    <script src="app.js?v=6"></script>
     <script>
         // Register Service Worker for PWA
         if ('serviceWorker' in navigator) {
