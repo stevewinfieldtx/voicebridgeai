@@ -16,6 +16,7 @@
     let direction = 'en-vi'; // 'en-vi' or 'vi-en'
     let isListening = false;
     let recognition = null;
+    let ttsUnlocked = false; // iOS Safari requires TTS to be triggered from a user gesture first
 
     // ---- Voice Settings State ----
     const voicePrefs = loadVoicePrefs();
@@ -417,7 +418,19 @@
         hideInterim();
     }
 
+    // ---- iOS TTS Unlock ----
+    // iOS Safari blocks speechSynthesis.speak() called from async callbacks.
+    // Firing a silent utterance on the first user tap unlocks it for the session.
+    function unlockTTS() {
+        if (ttsUnlocked || !window.speechSynthesis) return;
+        ttsUnlocked = true;
+        const silent = new SpeechSynthesisUtterance('');
+        silent.volume = 0;
+        window.speechSynthesis.speak(silent);
+    }
+
     function toggleListening() {
+        unlockTTS(); // must be called synchronously inside a user gesture
         if (isListening) stopListening();
         else startListening();
     }
