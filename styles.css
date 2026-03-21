@@ -117,12 +117,18 @@ body::before {
     font-weight: 400;
 }
 
-/* Settings gear button */
-.settings-btn {
+/* Settings / Share icon buttons */
+.header-actions {
     position: absolute;
     right: 0;
     top: 50%;
     transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.settings-btn {
     width: 36px;
     height: 36px;
     border: none;
@@ -876,4 +882,85 @@ body.dir-vi .pulse-ring {
         font-size: 0.62rem;
         padding: 6px 8px;
     }
+}
+
+/* ---- QR SHARE MODAL ---- */
+.qr-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition);
+}
+
+.qr-overlay.open {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.qr-panel {
+    background: #13131f;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 28px 24px 24px;
+    width: min(340px, 90vw);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    transform: scale(0.94);
+    transition: transform var(--transition);
+}
+
+.qr-overlay.open .qr-panel {
+    transform: scale(1);
+}
+
+.qr-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.qr-header h2 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    background: var(--accent-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.qr-url {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    font-family: 'Courier New', monospace;
+    letter-spacing: 0.02em;
+}
+
+.qr-img-wrap {
+    background: #fff;
+    border-radius: var(--radius-md);
+    padding: 8px;
+    line-height: 0;
+}
+
+.qr-img {
+    display: block;
+    border-radius: 6px;
+}
+
+.qr-hint {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-align: center;
+    line-height: 1.5;
 }

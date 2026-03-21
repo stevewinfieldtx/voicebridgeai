@@ -466,6 +466,16 @@
         speedValue = document.getElementById('speed-value');
         pitchValue = document.getElementById('pitch-value');
 
+        // QR Share DOM
+        const shareBtn   = document.getElementById('share-btn');
+        const qrOverlay  = document.getElementById('qr-overlay');
+        const qrClose    = document.getElementById('qr-close');
+        const openQR  = () => qrOverlay.classList.add('open');
+        const closeQR = () => qrOverlay.classList.remove('open');
+        shareBtn.addEventListener('click', openQR);
+        qrClose.addEventListener('click', closeQR);
+        qrOverlay.addEventListener('click', (e) => { if (e.target === qrOverlay) closeQR(); });
+
         setDirection('en-vi');
 
         chipEn.addEventListener('click', () => setDirection('en-vi'));
@@ -510,9 +520,9 @@
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
 
-            if (e.key === 'Escape' && settingsOverlay.classList.contains('open')) {
-                closeSettings();
-                return;
+            if (e.key === 'Escape') {
+                if (qrOverlay.classList.contains('open')) { closeQR(); return; }
+                if (settingsOverlay.classList.contains('open')) { closeSettings(); return; }
             }
             if (e.code === 'Space') {
                 e.preventDefault();
