@@ -1073,3 +1073,262 @@ body.dir-vi .pulse-ring {
     }
 }
 
+
+/* =========================================
+   Room Bar — persistent strip when connected
+   ========================================= */
+.room-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 20px;
+    background: rgba(40, 200, 120, 0.08);
+    border-bottom: 1px solid rgba(40, 200, 120, 0.18);
+    font-size: 0.82rem;
+    animation: roomBarSlide 0.4s ease;
+}
+@keyframes roomBarSlide {
+    from { opacity: 0; transform: translateY(-100%); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.room-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.room-bar-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #28c878;
+    box-shadow: 0 0 6px rgba(40, 200, 120, 0.6);
+    animation: roomPulse 2s ease infinite;
+}
+@keyframes roomPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+.room-bar-label {
+    color: var(--text-secondary);
+}
+.room-bar-label strong {
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 2px;
+    font-size: 0.85rem;
+}
+.room-bar-members {
+    color: #28c878;
+    font-weight: 500;
+}
+.room-bar-leave {
+    background: transparent;
+    border: 1px solid rgba(255, 100, 100, 0.3);
+    color: #ff6464;
+    padding: 4px 14px;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 500;
+    transition: var(--transition);
+}
+.room-bar-leave:hover {
+    background: rgba(255, 100, 100, 0.12);
+    border-color: rgba(255, 100, 100, 0.5);
+}
+
+/* =========================================
+   Room Modal Overlay
+   ========================================= */
+.room-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+}
+.room-overlay.open {
+    opacity: 1;
+    pointer-events: auto;
+}
+.room-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 28px 24px;
+    width: min(420px, 92vw);
+    max-height: 88vh;
+    overflow-y: auto;
+    transform: translateY(24px) scale(0.96);
+    transition: transform 0.35s ease;
+}
+.room-overlay.open .room-panel {
+    transform: translateY(0) scale(1);
+}
+.room-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+.room-modal-header h2 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    background: var(--accent-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.room-desc {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-bottom: 22px;
+    line-height: 1.5;
+}
+.room-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.room-action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: rgba(108, 159, 255, 0.1);
+    border: 1px solid rgba(108, 159, 255, 0.2);
+    color: var(--accent-en);
+    padding: 12px 18px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: var(--transition);
+    width: 100%;
+}
+.room-action-btn:hover {
+    background: rgba(108, 159, 255, 0.18);
+    border-color: rgba(108, 159, 255, 0.4);
+}
+.room-create-btn {
+    background: linear-gradient(135deg, rgba(108, 159, 255, 0.15), rgba(167, 139, 250, 0.15));
+    border-color: rgba(167, 139, 250, 0.25);
+    color: #a78bfa;
+}
+.room-create-btn:hover {
+    background: linear-gradient(135deg, rgba(108, 159, 255, 0.25), rgba(167, 139, 250, 0.25));
+}
+.room-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.room-divider::before,
+.room-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border-subtle);
+}
+.room-join-group {
+    display: flex;
+    gap: 8px;
+}
+.room-join-input {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    font-size: 1rem;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    text-align: center;
+    outline: none;
+    transition: var(--transition);
+}
+.room-join-input::placeholder {
+    font-family: 'Inter', sans-serif;
+    letter-spacing: 0;
+    text-transform: none;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+.room-join-input:focus {
+    border-color: var(--accent-en);
+    box-shadow: 0 0 0 3px var(--accent-en-dim);
+}
+.room-join-btn {
+    width: auto;
+    min-width: 80px;
+}
+.room-note {
+    margin-top: 14px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-align: center;
+    min-height: 1.2em;
+}
+.room-note.error {
+    color: #ff6464;
+}
+.room-note.success {
+    color: #28c878;
+}
+
+/* Room-sourced messages get a subtle "remote" badge */
+.msg-row.remote-msg {
+    position: relative;
+}
+.msg-row.remote-msg::before {
+    content: '📡';
+    position: absolute;
+    top: 8px;
+    left: -6px;
+    font-size: 0.7rem;
+    opacity: 0.5;
+}
+
+/* Room button active state */
+#room-btn.in-room {
+    color: #28c878;
+    position: relative;
+}
+#room-btn.in-room::after {
+    content: '';
+    position: absolute;
+    bottom: 2px;
+    right: 2px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #28c878;
+    box-shadow: 0 0 4px rgba(40, 200, 120, 0.6);
+}
+
+/* Mobile adjustments for room */
+@media (max-width: 600px) {
+    .room-bar {
+        padding: 6px 14px;
+        font-size: 0.78rem;
+    }
+    .room-panel {
+        padding: 22px 18px;
+    }
+    .room-join-input {
+        padding: 10px 12px;
+        font-size: 0.9rem;
+    }
+}
+

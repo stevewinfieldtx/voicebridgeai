@@ -42,6 +42,11 @@
                     <h1>VoiceBridge</h1>
                 </div>
                 <div class="header-actions">
+                    <button class="settings-btn" id="room-btn" aria-label="Room" title="Join / Create Room">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                        </svg>
+                    </button>
                     <button class="settings-btn" id="share-btn" aria-label="Share app" title="Share">
                         <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
                             <path d="M18 16c-.79 0-1.5.31-2.03.81L8.91 12.7A3.16 3.16 0 0 0 9 12c0-.24-.04-.47-.09-.7l7-4.05A2.99 2.99 0 0 0 18 8a3 3 0 1 0-3-3c0 .24.04.47.09.7L8.09 9.75A2.99 2.99 0 0 0 6 9a3 3 0 0 0 0 6c.79 0 1.5-.31 2.03-.81l7.06 4.12c-.05.22-.09.46-.09.69a3 3 0 1 0 3-3z"/>
@@ -56,6 +61,16 @@
             </div>
             <p class="tagline">Tap mic to start · tap the other panel to swap · ⚙ to change languages</p>
         </header>
+
+        <!-- Room Bar — shown when connected to a room -->
+        <div class="room-bar" id="room-bar" style="display: none;">
+            <div class="room-bar-left">
+                <span class="room-bar-dot"></span>
+                <span class="room-bar-label">Room <strong id="room-bar-code">----</strong></span>
+                <span class="room-bar-members" id="room-bar-members">1 online</span>
+            </div>
+            <button class="room-bar-leave" id="room-bar-leave" aria-label="Leave room">Leave</button>
+        </div>
 
         <!-- Settings Panel -->
         <div class="settings-overlay" id="settings-overlay">
@@ -224,6 +239,35 @@
                 <span id="status-text">Ready</span>
             </div>
         </footer>
+        <!-- Room Modal -->
+        <div class="room-overlay" id="room-overlay">
+            <div class="room-panel">
+                <div class="room-modal-header">
+                    <h2>Room</h2>
+                    <button class="settings-close" id="room-close" aria-label="Close">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                        </svg>
+                    </button>
+                </div>
+                <p class="room-desc">Share a room code to translate together — two phones, one conversation.</p>
+                <div class="room-actions">
+                    <button class="room-action-btn room-create-btn" id="room-create-btn">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                        </svg>
+                        Create Room
+                    </button>
+                    <div class="room-divider"><span>or</span></div>
+                    <div class="room-join-group">
+                        <input type="text" id="room-join-input" class="room-join-input" placeholder="Enter room code" maxlength="6" autocomplete="off" spellcheck="false" />
+                        <button class="room-action-btn room-join-btn" id="room-join-btn">Join</button>
+                    </div>
+                </div>
+                <p class="room-note" id="room-note"></p>
+            </div>
+        </div>
+
         <!-- QR Share Modal -->
         <div class="qr-overlay" id="qr-overlay">
             <div class="qr-panel">
@@ -249,7 +293,8 @@
         </div>
     </div>
 
-    <script src="app.js?v=8"></script>
+    <script src="app.js?v=9"></script>
+    <script src="room.js?v=1"></script>
     <script>
         // Register Service Worker for PWA
         if ('serviceWorker' in navigator) {

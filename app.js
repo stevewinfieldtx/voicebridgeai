@@ -278,7 +278,20 @@
 
         feedEl.prepend(row);
         scrollToTop();
+        return row;   // return DOM node for tagging
     }
+
+    // ---- Room integration hooks (used by room.js) ----
+    // Expose addMessage so room.js can render remote messages
+    window._vb = window._vb || {};
+    window._vb.addMessage = function (src, tr, fromLang, toLang, opts) {
+        const row = addMessage(src, tr, fromLang, toLang);
+        if (opts?.remote) row.classList.add('remote-msg');
+        return row;
+    };
+    window._vb.getLang = getLang;
+    // Hook: called after every local translate+speak so room can broadcast
+    window._vb.onLocalMessage = null;   // room.js sets this
 
     // ---- Speech Recognition ----
     function createRecognition() {
@@ -337,6 +350,10 @@
                     addMessage(text, translated, snapFrom, snapTo);
                     speak(translated, snapTo.tts);   // speak() will resume recognition when done
                     setStatus(isListening ? 'Listening...' : 'Ready');
+                    // Broadcast to room if connected
+                    if (window._vb.onLocalMessage) {
+                        window._vb.onLocalMessage(text, translated, snapFrom.code, snapTo.code);
+                    }
                 });
             }
         };
@@ -539,6 +556,8 @@
             if (e.key === 'Escape') {
                 if (qrOverlay.classList.contains('open')) { closeQR(); return; }
                 if (settingsOverlay.classList.contains('open')) { closeSettings(); return; }
+                const roomOv = document.getElementById('room-overlay');
+                if (roomOv && roomOv.classList.contains('open')) { roomOv.classList.remove('open'); return; }
             }
             if (e.code === 'Space') {
                 e.preventDefault();
