@@ -143,10 +143,30 @@
     // Tier 2: Google Translate TTS (free, unofficial, client-side)
     // Tier 3: Native Web Speech API (offline fallback)
 
+    /** Resume recognition after TTS finishes (called by each TTS tier). */
+    function resumeRecognitionAfterTTS() {
+        isSpeaking = false;
+        if (isListening) {
+            setTimeout(() => {
+                recognition = createRecognition();
+                if (recognition) {
+                    try { recognition.start(); } catch (e) { /* ok */ }
+                }
+            }, 300);  // brief pause so mic doesn't catch tail-end audio
+        }
+    }
+
     function speak(text, ttsCode) {
         if (ttsAudio) { ttsAudio.pause(); ttsAudio.src = ''; ttsAudio = null; }
         if (window.speechSynthesis) window.speechSynthesis.cancel();
+
+        // ── STOP recognition while TTS plays (echo suppression) ──
         isSpeaking = true;
+        if (recognition) {
+            try { recognition.abort(); } catch (e) { /* ok */ }
+            recognition = null;
+        }
+
         speakCloudTTS(text, ttsCode);
     }
 
@@ -154,7 +174,7 @@
     function speakCloudTTS(text, ttsCode) {
         const params = new URLSearchParams({ text, lang: ttsCode, rate: voicePrefs.speed });
         ttsAudio = new Audio(`/api/tts?${params}`);
-        ttsAudio.onended = () => { isSpeaking = false; };
+        ttsAudio.onended = () => { resumeRecognitionAfterTTS(); };
         ttsAudio.onerror = () => {
             console.warn('Cloud TTS unavailable, trying Google Translate TTS');
             speakGTTS(text, ttsCode);
@@ -173,7 +193,7 @@
         const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${gttsCode(ttsCode)}&client=gtx`;
         ttsAudio = new Audio(url);
         ttsAudio.playbackRate = voicePrefs.speed;
-        ttsAudio.onended = () => { isSpeaking = false; };
+        ttsAudio.onended = () => { resumeRecognitionAfterTTS(); };
         ttsAudio.onerror = () => {
             console.warn('Google TTS failed, using native');
             speakNative(text, ttsCode);
@@ -193,15 +213,15 @@
     }
 
     function speakNative(text, ttsCode) {
-        if (!window.speechSynthesis) { isSpeaking = false; return; }
+        if (!window.speechSynthesis) { resumeRecognitionAfterTTS(); return; }
         const utter = new SpeechSynthesisUtterance(text);
         utter.lang  = ttsCode;
         utter.rate  = voicePrefs.speed;
         utter.pitch = voicePrefs.pitch;
         const voice = getBestVoice(ttsCode);
         if (voice) utter.voice = voice;
-        utter.onend   = () => { isSpeaking = false; };
-        utter.onerror = () => { isSpeaking = false; };
+        utter.onend   = () => { resumeRecognitionAfterTTS(); };
+        utter.onerror = () => { resumeRecognitionAfterTTS(); };
         window.speechSynthesis.speak(utter);
     }
 
@@ -358,6 +378,8 @@
 
         rec.onend = () => {
             if (rec !== recognition) return;
+            // If TTS is playing, don't restart — speak()'s callback will handle it
+            if (isSpeaking) return;
             if (isListening) {
                 // Fresh instance each time — prevents Chrome replaying accumulated results
                 recognition = createRecognition();
