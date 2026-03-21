@@ -124,31 +124,43 @@
     }
 
     // ---- Text-to-Speech ----
+    // Tier 1: Google Cloud TTS via /api/tts (Vercel, key stays server-side)
+    // Tier 2: Google Translate TTS (free, unofficial, client-side)
+    // Tier 3: Native Web Speech API (offline fallback)
 
-    // Map our BCP-47 tts tags to Google Translate's short codes
+    function speak(text, ttsCode) {
+        if (ttsAudio) { ttsAudio.pause(); ttsAudio.src = ''; ttsAudio = null; }
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+        speakCloudTTS(text, ttsCode);
+    }
+
+    // Tier 1 — Google Cloud TTS via Vercel serverless proxy
+    function speakCloudTTS(text, ttsCode) {
+        const params = new URLSearchParams({ text, lang: ttsCode, rate: voicePrefs.speed });
+        ttsAudio = new Audio(`/api/tts?${params}`);
+        ttsAudio.onerror = () => {
+            console.warn('Cloud TTS unavailable, trying Google Translate TTS');
+            speakGTTS(text, ttsCode);
+        };
+        ttsAudio.play().catch(() => speakGTTS(text, ttsCode));
+    }
+
+    // Tier 2 — Google Translate TTS (unofficial, ~200 char limit)
     function gttsCode(ttsTag) {
-        // Keep these as-is; everything else uses just the primary subtag
         const keepFull = ['zh-CN', 'zh-TW', 'pt-BR'];
         return keepFull.includes(ttsTag) ? ttsTag : ttsTag.split('-')[0];
     }
 
-    function speak(text, ttsCode) {
-        // Stop any in-progress audio
-        if (ttsAudio) { ttsAudio.pause(); ttsAudio.src = ''; ttsAudio = null; }
-        if (window.speechSynthesis) window.speechSynthesis.cancel();
-
-        const langCode = gttsCode(ttsCode);
-        // Google Translate TTS has a ~200 char limit per request
+    function speakGTTS(text, ttsCode) {
         if (text.length > 200) { speakNative(text, ttsCode); return; }
-
-        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${langCode}&client=gtx`;
+        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${gttsCode(ttsCode)}&client=gtx`;
         ttsAudio = new Audio(url);
         ttsAudio.playbackRate = voicePrefs.speed;
-        ttsAudio.onerror = () => { console.warn('Google TTS failed — using native'); speakNative(text, ttsCode); };
+        ttsAudio.onerror = () => { console.warn('Google TTS failed, using native'); speakNative(text, ttsCode); };
         ttsAudio.play().catch(() => speakNative(text, ttsCode));
     }
 
-    // Native Web Speech API fallback
+    // Tier 3 — Native Web Speech API
     function getBestVoice(ttsCode) {
         const voices = window.speechSynthesis.getVoices();
         return (
