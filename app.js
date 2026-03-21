@@ -354,12 +354,20 @@
                 hideInterim();
                 setStatus('Translating...');
 
+                // ── IMMEDIATELY kill mic so onend can't restart during async translation ──
+                isSpeaking = true;   // block onend from restarting
+                if (recognition) {
+                    const old = recognition;
+                    recognition = null;
+                    try { old.abort(); } catch (e) { /* ok */ }
+                }
+
                 const snapFrom = getLang(fromCode);
                 const snapTo   = getLang(toCode);
 
                 translateText(text, snapFrom, snapTo).then((translated) => {
                     addMessage(text, translated, snapFrom, snapTo);
-                    speak(translated, snapTo.tts);
+                    speak(translated, snapTo.tts);   // speak() will resume recognition when done
                     setStatus(isListening ? 'Listening...' : 'Ready');
                 });
             }
