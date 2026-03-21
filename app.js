@@ -44,6 +44,7 @@
     let isListening = false;
     let recognition = null;
     let ttsUnlocked = false;
+    let ttsAudio = null;
 
     // ---- Voice Settings State ----
     const voicePrefs = loadVoicePrefs();
@@ -123,19 +124,43 @@
     }
 
     // ---- Text-to-Speech ----
+
+    // Map our BCP-47 tts tags to Google Translate's short codes
+    function gttsCode(ttsTag) {
+        // Keep these as-is; everything else uses just the primary subtag
+        const keepFull = ['zh-CN', 'zh-TW', 'pt-BR'];
+        return keepFull.includes(ttsTag) ? ttsTag : ttsTag.split('-')[0];
+    }
+
+    function speak(text, ttsCode) {
+        // Stop any in-progress audio
+        if (ttsAudio) { ttsAudio.pause(); ttsAudio.src = ''; ttsAudio = null; }
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+
+        const langCode = gttsCode(ttsCode);
+        // Google Translate TTS has a ~200 char limit per request
+        if (text.length > 200) { speakNative(text, ttsCode); return; }
+
+        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${langCode}&client=gtx`;
+        ttsAudio = new Audio(url);
+        ttsAudio.playbackRate = voicePrefs.speed;
+        ttsAudio.onerror = () => { console.warn('Google TTS failed — using native'); speakNative(text, ttsCode); };
+        ttsAudio.play().catch(() => speakNative(text, ttsCode));
+    }
+
+    // Native Web Speech API fallback
     function getBestVoice(ttsCode) {
         const voices = window.speechSynthesis.getVoices();
-        // Prefer exact lang match, then prefix match
         return (
+            voices.find(v => v.name.toLowerCase().includes('google') && v.lang === ttsCode) ||
             voices.find(v => v.lang === ttsCode) ||
             voices.find(v => v.lang.startsWith(ttsCode.slice(0, 2))) ||
             null
         );
     }
 
-    function speak(text, ttsCode) {
+    function speakNative(text, ttsCode) {
         if (!window.speechSynthesis) return;
-        window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(text);
         utter.lang  = ttsCode;
         utter.rate  = voicePrefs.speed;
