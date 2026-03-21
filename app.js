@@ -138,70 +138,8 @@
         }
     }
 
-    // ---- Text-to-Speech ----
-    // Tier 1: Google Cloud TTS via /api/tts (Vercel, key stays server-side)
-    // Tier 2: Google Translate TTS (free, unofficial, client-side)
-    // Tier 3: Native Web Speech API (offline fallback)
+    // ---- Text-to-Speech (Native Web Speech API) ----
 
-    /** Resume recognition after TTS finishes (called by each TTS tier). */
-    function resumeRecognitionAfterTTS() {
-        isSpeaking = false;
-        if (isListening) {
-            setTimeout(() => {
-                recognition = createRecognition();
-                if (recognition) {
-                    try { recognition.start(); } catch (e) { /* ok */ }
-                }
-            }, 300);  // brief pause so mic doesn't catch tail-end audio
-        }
-    }
-
-    function speak(text, ttsCode) {
-        if (ttsAudio) { ttsAudio.pause(); ttsAudio.src = ''; ttsAudio = null; }
-        if (window.speechSynthesis) window.speechSynthesis.cancel();
-
-        // ── STOP recognition while TTS plays (echo suppression) ──
-        isSpeaking = true;
-        if (recognition) {
-            try { recognition.abort(); } catch (e) { /* ok */ }
-            recognition = null;
-        }
-
-        speakCloudTTS(text, ttsCode);
-    }
-
-    // Tier 1 — Google Cloud TTS via Vercel serverless proxy
-    function speakCloudTTS(text, ttsCode) {
-        const params = new URLSearchParams({ text, lang: ttsCode, rate: voicePrefs.speed });
-        ttsAudio = new Audio(`/api/tts?${params}`);
-        ttsAudio.onended = () => { resumeRecognitionAfterTTS(); };
-        ttsAudio.onerror = () => {
-            console.warn('Cloud TTS unavailable, trying Google Translate TTS');
-            speakGTTS(text, ttsCode);
-        };
-        ttsAudio.play().catch(() => speakGTTS(text, ttsCode));
-    }
-
-    // Tier 2 — Google Translate TTS (unofficial, ~200 char limit)
-    function gttsCode(ttsTag) {
-        const keepFull = ['zh-CN', 'zh-TW', 'pt-BR'];
-        return keepFull.includes(ttsTag) ? ttsTag : ttsTag.split('-')[0];
-    }
-
-    function speakGTTS(text, ttsCode) {
-        if (text.length > 200) { speakNative(text, ttsCode); return; }
-        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${gttsCode(ttsCode)}&client=gtx`;
-        ttsAudio = new Audio(url);
-        ttsAudio.playbackRate = voicePrefs.speed;
-        ttsAudio.onended = () => { resumeRecognitionAfterTTS(); };
-        ttsAudio.onerror = () => {
-            console.warn('Google TTS failed, using native');
-            speakNative(text, ttsCode);
-        };
-        ttsAudio.play().catch(() => speakNative(text, ttsCode));
-    }
-
-    // Tier 3 — Native Web Speech API
     function getBestVoice(ttsCode) {
         const voices = window.speechSynthesis.getVoices();
         return (
@@ -212,16 +150,46 @@
         );
     }
 
-    function speakNative(text, ttsCode) {
-        if (!window.speechSynthesis) { resumeRecognitionAfterTTS(); return; }
+    function speak(text, ttsCode) {
+        // Stop any in-progress TTS
+        if (ttsAudio) { ttsAudio.pause(); ttsAudio.src = ''; ttsAudio = null; }
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+
+        if (!window.speechSynthesis) { isSpeaking = false; return; }
+
+        isSpeaking = true;
+
         const utter = new SpeechSynthesisUtterance(text);
         utter.lang  = ttsCode;
         utter.rate  = voicePrefs.speed;
         utter.pitch = voicePrefs.pitch;
         const voice = getBestVoice(ttsCode);
         if (voice) utter.voice = voice;
-        utter.onend   = () => { resumeRecognitionAfterTTS(); };
-        utter.onerror = () => { resumeRecognitionAfterTTS(); };
+
+        utter.onend = () => {
+            isSpeaking = false;
+            // Resume recognition after TTS finishes
+            if (isListening) {
+                setTimeout(() => {
+                    recognition = createRecognition();
+                    if (recognition) {
+                        try { recognition.start(); } catch (e) { /* ok */ }
+                    }
+                }, 300);
+            }
+        };
+        utter.onerror = () => {
+            isSpeaking = false;
+            if (isListening) {
+                setTimeout(() => {
+                    recognition = createRecognition();
+                    if (recognition) {
+                        try { recognition.start(); } catch (e) { /* ok */ }
+                    }
+                }, 300);
+            }
+        };
+
         window.speechSynthesis.speak(utter);
     }
 
