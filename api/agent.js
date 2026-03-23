@@ -142,7 +142,7 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
                     temperature: 0.1,
                 },
                 first_message: '',
-                language: '',
+                language: fromCode,
             },
             turn: {
                 mode: 'turn',
