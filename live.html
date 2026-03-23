@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoiceBridge — Live Translate</title>
+    <meta name="description" content="Live voice translation powered by ElevenLabs AI. Two people, one phone, seamless translation.">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=3">
+    <style>
+        /* ---- Live Translate Page Styles ---- */
+        .live-container {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 0 1rem;
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        .live-header {
+            padding: 1.25rem 0 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .live-back {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 500;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+        .live-back:hover { opacity: 1; }
+        .live-back svg { width: 18px; height: 18px; }
+        .live-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .live-subtitle {
+            font-size: 0.78rem;
+            color: var(--text-dim);
+            margin-top: 0.25rem;
+            line-height: 1.5;
+        }
+
+        /* Language Selectors */
+        .live-lang-row {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            margin: 1.25rem 0;
+        }
+        .live-lang-select {
+            flex: 1;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.92rem;
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(255,255,255,0.04);
+            color: var(--text);
+            appearance: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%23888'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+        }
+        .live-lang-select:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: rgba(108, 99, 255, 0.06);
+        }
+        .live-lang-select:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .live-swap-icon {
+            flex-shrink: 0;
+            color: var(--text-dim);
+            opacity: 0.5;
+        }
+
+        /* Start / Stop Button */
+        .live-start-btn {
+            width: 100%;
+            padding: 1rem;
+            border: none;
+            border-radius: 16px;
+            font-family: 'Inter', sans-serif;
+            font-size: 1.05rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            transition: all 0.3s ease;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            position: relative;
+            overflow: hidden;
+        }
+        .live-start-btn::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.1), transparent);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .live-start-btn:hover::before { opacity: 1; }
+        .live-start-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .live-start-btn.active {
+            background: linear-gradient(135deg, #FF4757, #FF6B81);
+            animation: pulseBtn 2s ease-in-out infinite;
+        }
+        @keyframes pulseBtn {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.3); }
+            50% { box-shadow: 0 0 0 12px rgba(255, 71, 87, 0); }
+        }
+        .live-start-btn svg { width: 22px; height: 22px; }
+
+        /* Status Bar */
+        .live-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            justify-content: center;
+            padding: 0.75rem 0;
+            font-size: 0.82rem;
+            color: var(--text-dim);
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            transition: background 0.3s;
+        }
+        .status-dot.connecting {
+            background: #FFD43B;
+            animation: blink 1s ease-in-out infinite;
+        }
+        .status-dot.active {
+            background: #51CF66;
+            animation: blink 2s ease-in-out infinite;
+        }
+        .status-dot.speaking {
+            background: var(--accent);
+            animation: blink 0.8s ease-in-out infinite;
+        }
+        .status-dot.error {
+            background: #FF4757;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Transcript Area */
+        .live-transcript {
+            flex: 1;
+            min-height: 200px;
+            max-height: calc(100dvh - 380px);
+            overflow-y: auto;
+            margin-top: 0.5rem;
+            padding: 1rem;
+            border-radius: 16px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            scroll-behavior: smooth;
+        }
+        .transcript-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            gap: 0.75rem;
+            color: var(--text-dim);
+            opacity: 0.5;
+        }
+        .transcript-empty svg {
+            width: 40px;
+            height: 40px;
+            opacity: 0.4;
+        }
+        .transcript-empty p {
+            font-size: 0.85rem;
+        }
+
+        .transcript-line {
+            font-size: 0.88rem;
+            line-height: 1.6;
+            padding: 0.5rem 0.75rem;
+            border-radius: 10px;
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .transcript-line.user {
+            background: rgba(108, 99, 255, 0.08);
+            border-left: 3px solid var(--accent);
+            color: var(--text);
+        }
+        .transcript-line.agent {
+            background: rgba(255, 101, 132, 0.08);
+            border-left: 3px solid var(--accent2);
+            color: var(--text);
+        }
+        .transcript-line.system {
+            color: var(--text-dim);
+            font-size: 0.8rem;
+            padding: 0.3rem 0.5rem;
+            opacity: 0.7;
+        }
+        .transcript-line.error {
+            color: #FF6B81;
+            font-size: 0.8rem;
+            padding: 0.3rem 0.5rem;
+        }
+
+        /* Footer note */
+        .live-footer {
+            padding: 1rem 0;
+            text-align: center;
+            font-size: 0.72rem;
+            color: var(--text-dim);
+            opacity: 0.4;
+        }
+    </style>
+</head>
+<body>
+    <div class="live-container">
+        <!-- Header -->
+        <header class="live-header">
+            <a href="index.html" class="live-back" id="back-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M15 18l-6-6 6-6"/>
+                </svg>
+                Back
+            </a>
+        </header>
+
+        <div>
+            <h1 class="live-title">Live Translate</h1>
+            <p class="live-subtitle">Two people, one phone. Speak naturally — the AI translates both directions in real time.</p>
+        </div>
+
+        <!-- Language Selectors -->
+        <div class="live-lang-row">
+            <select id="lang-from" class="live-lang-select" aria-label="Source language"></select>
+            <svg class="live-swap-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <path d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/>
+            </svg>
+            <select id="lang-to" class="live-lang-select" aria-label="Target language"></select>
+        </div>
+
+        <!-- Start / Stop -->
+        <button class="live-start-btn" id="start-btn">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke="currentColor" stroke-width="2"/>
+                <line x1="12" y1="19" x2="12" y2="23" stroke="currentColor" stroke-width="2"/>
+                <line x1="8" y1="23" x2="16" y2="23" stroke="currentColor" stroke-width="2"/>
+            </svg>
+            <span class="btn-label">Start</span>
+        </button>
+
+        <!-- Status -->
+        <div class="live-status">
+            <div class="status-dot" id="status-dot"></div>
+            <span id="status-text">Ready</span>
+        </div>
+
+        <!-- Transcript -->
+        <div class="live-transcript" id="transcript">
+            <div class="transcript-empty" id="transcript-empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                    <line x1="12" y1="19" x2="12" y2="23"/>
+                    <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+                <p>Press Start to begin translating</p>
+            </div>
+        </div>
+
+        <div class="live-footer">
+            Powered by ElevenLabs Conversational AI
+        </div>
+    </div>
+
+    <script src="live.js?v=1"></script>
+</body>
+</html>
