@@ -146,11 +146,13 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
             },
             turn: {
                 mode: 'turn',
+                turn_timeout: 3,
                 silence_end_call_timeout: 600,
             },
             tts: {
                 voice_id: voiceId,
-                model_id: 'eleven_flash_v2',
+                model_id: 'eleven_turbo_v2',
+                optimize_streaming_latency: 4,
             },
         },
     };
