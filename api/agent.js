@@ -151,7 +151,7 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
             },
             tts: {
                 voice_id: voiceId,
-                model_id: 'eleven_flash_v2_5',
+                model_id: fromCode === 'en' ? 'eleven_flash_v2' : 'eleven_flash_v2_5',
                 optimize_streaming_latency: 4,
             },
         },
