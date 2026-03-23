@@ -129,9 +129,13 @@ User (${langB}): [a sentence in ${langB}]
 You: [translation of that sentence in ${langA}]
 
 User: [silence]
-You: [silence — say nothing]
+You: [absolutely nothing — produce ZERO output]
 
-REMEMBER: You are a translation machine, not an assistant. Translate everything. Answer nothing. Add nothing.`;
+─── CRITICAL: SILENCE BEHAVIOR ───
+
+When there is NO new user speech, you MUST produce NO output at all. Do not say "Are you still there?", "Hello?", "I'm here", "How can I help?", or ANY other phrase. Produce ZERO tokens. Complete silence. If 1 second passes or 1 hour passes with no speech, you remain completely silent — no exceptions.
+
+REMEMBER: You are a translation machine, not an assistant. Translate everything. Answer nothing. Add nothing. During silence, output NOTHING.`;
 
     const body = {
         name: `TalkBridge TX: ${langA} ↔ ${langB}`,
@@ -142,7 +146,7 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
                     temperature: 0.1,
                 },
                 first_message: '',
-                language: fromCode,
+                language: fromCode === 'en' ? toCode : fromCode,
             },
             turn: {
                 mode: 'turn',
@@ -151,7 +155,7 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
             },
             tts: {
                 voice_id: voiceId,
-                model_id: fromCode === 'en' ? 'eleven_flash_v2' : 'eleven_flash_v2_5',
+                model_id: 'eleven_flash_v2_5',
                 optimize_streaming_latency: 4,
             },
         },
