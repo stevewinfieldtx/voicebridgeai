@@ -55,6 +55,15 @@
     let scheduledSources = [];     // active AudioBufferSourceNodes
     const AGENT_SAMPLE_RATE = 16000;  // ElevenLabs output PCM sample rate
 
+    // Reconnection state
+    let reconnectAttempts = 0;
+    const MAX_RECONNECTS = 5;
+    let reconnectTimer = null;
+    let lastPongTime = 0;
+    let watchdogInterval = null;
+    let currentFrom = '';
+    let currentTo = '';
+
     // ---- Populate Language Selects ----
     LANGS.forEach(lang => {
         langFromSelect.add(new Option(`${lang.flag} ${lang.name}`, lang.code));
@@ -106,6 +115,10 @@
             return;
         }
 
+        currentFrom = from;
+        currentTo = to;
+        reconnectAttempts = 0;
+
         setStatus('connecting', 'Connecting…');
         startBtn.disabled = true;
         langFromSelect.disabled = true;
@@ -113,35 +126,29 @@
         genderBtns.forEach(b => b.disabled = true);
 
         try {
-            // Step 1: Get signed WebSocket URL from our server
-        const resp = await fetch(`/api/agent?from=${from}&to=${to}&gender=${selectedGender}`);
-            if (!resp.ok) {
-                const err = await resp.json();
-                throw new Error(err.error || 'Server error');
+            // Step 1: Get microphone access (keep alive across reconnects)
+            if (!mediaStream) {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        sampleRate: 16000,
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                    },
+                });
             }
-            const { signedUrl, languages } = await resp.json();
 
-            addTranscriptLine(`🔗 Agent ready: ${languages.a} ↔ ${languages.b}`, 'system');
-
-            // Step 2: Get microphone access
-            mediaStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    sampleRate: 16000,
-                    channelCount: 1,
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true,
-                },
-            });
-
-            // Step 3: Create playback audio context
-            playbackCtx = new (window.AudioContext || window.webkitAudioContext)({
-                sampleRate: AGENT_SAMPLE_RATE,
-            });
+            // Step 2: Create playback audio context
+            if (!playbackCtx) {
+                playbackCtx = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: AGENT_SAMPLE_RATE,
+                });
+            }
             nextPlayTime = 0;
 
-            // Step 4: Connect WebSocket to ElevenLabs
-            connectWebSocket(signedUrl);
+            // Step 3: Connect WebSocket (gets fresh signed URL)
+            await connectWebSocket();
 
         } catch (err) {
             console.error('Start error:', err);
@@ -151,17 +158,53 @@
         }
     }
 
-    // ---- WebSocket Connection ----
-    function connectWebSocket(url) {
-        ws = new WebSocket(url);
+    // ---- Fetch fresh signed URL from our server ----
+    async function fetchSignedUrl() {
+        const resp = await fetch(
+            `/api/agent?from=${currentFrom}&to=${currentTo}&gender=${selectedGender}`
+        );
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.error || 'Server error');
+        }
+        const data = await resp.json();
+        return data;
+    }
+
+    // ---- WebSocket Connection (with auto-reconnect) ----
+    async function connectWebSocket() {
+        // Always fetch a fresh signed URL for each connection
+        const { signedUrl, languages } = await fetchSignedUrl();
+        if (reconnectAttempts === 0) {
+            addTranscriptLine(`🔗 Agent ready: ${languages.a} ↔ ${languages.b}`, 'system');
+        } else {
+            addTranscriptLine(`🔄 Reconnected (attempt ${reconnectAttempts})`, 'system');
+        }
+
+        // Close any existing WebSocket cleanly
+        if (ws) {
+            try { ws.close(); } catch (_) { /* ignore */ }
+            ws = null;
+        }
+
+        ws = new WebSocket(signedUrl);
+        lastPongTime = Date.now();
 
         ws.onopen = () => {
             setStatus('active', 'Listening…');
             isActive = true;
+            reconnectAttempts = 0; // reset on successful connection
             startBtn.disabled = false;
             startBtn.querySelector('.btn-label').textContent = 'Stop';
             startBtn.classList.add('active');
-            startAudioCapture();
+
+            // Start mic capture if not already running
+            if (!processorNode) {
+                startAudioCapture();
+            }
+
+            // Start watchdog
+            startWatchdog();
         };
 
         ws.onmessage = (event) => {
@@ -176,16 +219,68 @@
 
         ws.onerror = (err) => {
             console.error('WS error:', err);
-            addTranscriptLine('⚠️ Connection error', 'error');
         };
 
         ws.onclose = (event) => {
             console.log('WS closed:', event.code, event.reason);
+            stopWatchdog();
+
             if (isActive) {
-                addTranscriptLine('🔌 Connection closed', 'system');
-                stopSession();
+                // Unexpected close — try to reconnect
+                attemptReconnect();
             }
         };
+    }
+
+    // ---- Auto-Reconnect with Backoff ----
+    function attemptReconnect() {
+        if (!isActive) return;
+        if (reconnectAttempts >= MAX_RECONNECTS) {
+            addTranscriptLine('❌ Lost connection after multiple retries. Please restart.', 'error');
+            stopSession();
+            return;
+        }
+
+        reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 8000); // 1s, 2s, 4s, 8s...
+        setStatus('connecting', `Reconnecting in ${delay / 1000}s…`);
+        addTranscriptLine(`⚡ Connection lost. Reconnecting… (${reconnectAttempts}/${MAX_RECONNECTS})`, 'system');
+
+        // Stop any current audio but keep mic alive
+        stopCurrentAudio();
+
+        reconnectTimer = setTimeout(async () => {
+            if (!isActive) return;
+            try {
+                await connectWebSocket();
+            } catch (err) {
+                console.error('Reconnect error:', err);
+                attemptReconnect(); // try again
+            }
+        }, delay);
+    }
+
+    // ---- Connection Watchdog ----
+    function startWatchdog() {
+        stopWatchdog();
+        watchdogInterval = setInterval(() => {
+            if (!isActive || !ws) return;
+
+            // If we haven't received a pong in 30 seconds, connection is dead
+            if (Date.now() - lastPongTime > 30000) {
+                console.warn('Watchdog: no pong in 30s, forcing reconnect');
+                if (ws) {
+                    try { ws.close(); } catch (_) { /* triggers onclose → reconnect */ }
+                }
+            }
+        }, 15000); // check every 15 seconds
+    }
+
+    function stopWatchdog() {
+        if (watchdogInterval) {
+            clearInterval(watchdogInterval);
+            watchdogInterval = null;
+        }
     }
 
     // ---- Handle Messages from ElevenLabs Agent ----
@@ -222,7 +317,8 @@
                 break;
 
             case 'ping':
-                // Respond to keep-alive
+                // Respond to keep-alive and track liveness
+                lastPongTime = Date.now();
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({
                         type: 'pong',
@@ -346,9 +442,16 @@
         isAgentSpeaking = false;
     }
 
-    // ---- Stop Session ----
+    // ---- Stop Session (user-initiated) ----
     function stopSession() {
         isActive = false;
+
+        // Cancel any pending reconnect
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+        stopWatchdog();
 
         // Close WebSocket
         if (ws) {
@@ -381,6 +484,7 @@
             playbackCtx = null;
         }
 
+        reconnectAttempts = 0;
         resetControls();
         setStatus('idle', 'Ready');
         addTranscriptLine('⏹ Session ended', 'system');

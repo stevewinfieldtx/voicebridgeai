@@ -8,7 +8,7 @@
 
 // In-memory cache: "en|vi" → { agentId, createdAt }
 const agentCache = {};
-const CACHE_TTL = 60 * 1000; // 60 seconds — short TTL so prompt changes take effect quickly
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes — agents are config, not sessions
 
 const LANGUAGE_NAMES = {
     en: 'English', vi: 'Vietnamese', es: 'Spanish', fr: 'French',
