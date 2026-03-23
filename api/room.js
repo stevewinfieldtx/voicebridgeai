@@ -1,26 +1,28 @@
 /**
  * VoiceBridge — Room Relay API
  *
- * POST /api/room  — Send a message to a room
- *   Body: { room, id, source, translated, fromLang, toLang, sender }
+ * All requests are POST with JSON body containing an `action` field:
  *
- * GET  /api/room?room=XXX&since=<timestamp>  — Poll for messages
+ *   action: "create"                          → { roomCode, memberId }
+ *   action: "join",    roomCode               → { roomCode, memberId }
+ *   action: "send",    roomCode, memberId, sourceText, translatedText, fromLang, toLang
+ *   action: "poll",    roomCode, memberId, since  → { members, messages }
+ *   action: "leave",   roomCode, memberId
+ *   action: "heartbeat", roomCode, memberId   → { ok, members }
  *
- * GET  /api/room?room=XXX&heartbeat=<senderId> — Register/refresh presence
- *
- * Messages are kept in-memory. Rooms auto-expire after 30 minutes of inactivity.
+ * Messages are kept in-memory. Rooms auto-expire after 30 min of inactivity.
  */
 
-// In-memory store: Map<roomCode, { messages: [], lastActivity: number, members: Map<id, lastSeen> }>
+// In-memory store
 const rooms = new Map();
 
-const MAX_MESSAGES = 200;        // per room
-const ROOM_TTL     = 30 * 60e3;  // 30 min inactivity → room dies
-const MEMBER_TTL   = 15e3;       // 15s without heartbeat → considered disconnected
-const CLEANUP_INTERVAL = 60e3;   // run cleanup every 60s
+const MAX_MESSAGES     = 200;
+const ROOM_TTL         = 30 * 60e3;   // 30 min
+const MEMBER_TTL       = 30e3;        // 30s without heartbeat → disconnected
+const CLEANUP_INTERVAL = 60e3;
 
-// Periodic cleanup (runs within same function invocation context)
 let lastCleanup = 0;
+
 function cleanup() {
     const now = Date.now();
     if (now - lastCleanup < CLEANUP_INTERVAL) return;
@@ -29,9 +31,8 @@ function cleanup() {
         if (now - room.lastActivity > ROOM_TTL) {
             rooms.delete(code);
         } else {
-            // Prune dead members
-            for (const [id, lastSeen] of room.members) {
-                if (now - lastSeen > MEMBER_TTL * 2) {
+            for (const [id, member] of room.members) {
+                if (now - member.lastSeen > MEMBER_TTL * 2) {
                     room.members.delete(id);
                 }
             }
@@ -39,17 +40,43 @@ function cleanup() {
     }
 }
 
+function generateCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1 for clarity
+    let code = '';
+    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+}
+
+function generateId() {
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
 function getRoom(code) {
-    if (!rooms.has(code)) {
-        rooms.set(code, {
-            messages: [],
-            lastActivity: Date.now(),
-            members: new Map(),
-        });
-    }
+    if (!rooms.has(code)) return null;
     const room = rooms.get(code);
     room.lastActivity = Date.now();
     return room;
+}
+
+function createRoom() {
+    let code;
+    do { code = generateCode(); } while (rooms.has(code));
+    rooms.set(code, {
+        messages: [],
+        lastActivity: Date.now(),
+        members: new Map(),
+        seq: 0,
+    });
+    return code;
+}
+
+function activeMembers(room) {
+    const now = Date.now();
+    let count = 0;
+    for (const [, m] of room.members) {
+        if (now - m.lastSeen < MEMBER_TTL) count++;
+    }
+    return count;
 }
 
 function corsHeaders() {
@@ -70,87 +97,124 @@ export default function handler(req, res) {
     cleanup();
 
     const headers = { ...corsHeaders(), 'Content-Type': 'application/json' };
+    const ok  = (data) => { res.writeHead(200, headers); res.end(JSON.stringify(data)); };
+    const err = (code, msg) => { res.writeHead(code, headers); res.end(JSON.stringify({ error: msg })); };
 
-    // ---- POST: send a message ----
-    if (req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-            try {
-                const data = JSON.parse(body);
-                const { room: roomCode, id, source, translated, fromLang, toLang, sender } = data;
+    if (req.method !== 'POST') {
+        return err(405, 'Method not allowed');
+    }
 
-                if (!roomCode || !source) {
-                    res.writeHead(400, headers);
-                    return res.end(JSON.stringify({ error: 'Missing room or source' }));
-                }
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+        let data;
+        try { data = JSON.parse(body); } catch { return err(400, 'Invalid JSON'); }
 
-                const room = getRoom(roomCode);
-                const msg = {
-                    id: id || `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                    source,
-                    translated: translated || '',
-                    fromLang: fromLang || '',
-                    toLang: toLang || '',
-                    sender: sender || 'unknown',
-                    ts: Date.now(),
-                };
+        const { action } = data;
 
-                room.messages.push(msg);
-                // Cap messages
-                if (room.messages.length > MAX_MESSAGES) {
-                    room.messages = room.messages.slice(-MAX_MESSAGES);
-                }
+        // ── CREATE ──
+        if (action === 'create') {
+            const roomCode = createRoom();
+            const memberId = generateId();
+            const room = rooms.get(roomCode);
+            room.members.set(memberId, { lastSeen: Date.now() });
+            return ok({ roomCode, memberId });
+        }
 
-                res.writeHead(200, headers);
-                return res.end(JSON.stringify({ ok: true, id: msg.id }));
-            } catch (err) {
-                res.writeHead(400, headers);
-                return res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        // ── JOIN ──
+        if (action === 'join') {
+            const { roomCode } = data;
+            if (!roomCode) return err(400, 'Missing roomCode');
+            // Auto-create if room doesn't exist (graceful)
+            if (!rooms.has(roomCode)) {
+                rooms.set(roomCode, {
+                    messages: [],
+                    lastActivity: Date.now(),
+                    members: new Map(),
+                    seq: 0,
+                });
             }
-        });
-        return;
-    }
-
-    // ---- GET: poll for messages or heartbeat ----
-    if (req.method === 'GET') {
-        const url = new URL(req.url, `http://${req.headers.host}`);
-        const roomCode  = url.searchParams.get('room');
-        const since     = parseInt(url.searchParams.get('since') || '0', 10);
-        const heartbeat = url.searchParams.get('heartbeat');
-
-        if (!roomCode) {
-            res.writeHead(400, headers);
-            return res.end(JSON.stringify({ error: 'Missing room param' }));
+            const room = getRoom(roomCode);
+            const memberId = generateId();
+            room.members.set(memberId, { lastSeen: Date.now() });
+            return ok({ roomCode, memberId, members: activeMembers(room) });
         }
 
-        const room = getRoom(roomCode);
+        // ── SEND ──
+        if (action === 'send') {
+            const { roomCode, memberId, sourceText, translatedText, fromLang, toLang } = data;
+            if (!roomCode || !memberId) return err(400, 'Missing roomCode or memberId');
+            const room = getRoom(roomCode);
+            if (!room) return err(404, 'Room not found');
 
-        // Register heartbeat
-        if (heartbeat) {
-            room.members.set(heartbeat, Date.now());
+            room.seq++;
+            const msg = {
+                seq: room.seq,
+                memberId,
+                sourceText: sourceText || '',
+                translatedText: translatedText || '',
+                fromLang: fromLang || '',
+                toLang: toLang || '',
+                ts: Date.now(),
+            };
+            room.messages.push(msg);
+            if (room.messages.length > MAX_MESSAGES) {
+                room.messages = room.messages.slice(-MAX_MESSAGES);
+            }
+
+            // Refresh sender heartbeat
+            if (room.members.has(memberId)) {
+                room.members.get(memberId).lastSeen = Date.now();
+            }
+
+            return ok({ ok: true, seq: msg.seq });
         }
 
-        // Count active members (seen within MEMBER_TTL)
-        const now = Date.now();
-        let activeCount = 0;
-        for (const [, lastSeen] of room.members) {
-            if (now - lastSeen < MEMBER_TTL) activeCount++;
+        // ── POLL ──
+        if (action === 'poll') {
+            const { roomCode, memberId, since } = data;
+            if (!roomCode || !memberId) return err(400, 'Missing roomCode or memberId');
+            const room = getRoom(roomCode);
+            if (!room) return err(404, 'Room not found');
+
+            // Refresh heartbeat on poll
+            if (room.members.has(memberId)) {
+                room.members.get(memberId).lastSeen = Date.now();
+            }
+
+            const sinceSeq = parseInt(since) || 0;
+            const newMessages = room.messages.filter(m => m.seq > sinceSeq);
+
+            return ok({
+                members: activeMembers(room),
+                messages: newMessages,
+            });
         }
 
-        // Get messages since timestamp
-        const newMessages = room.messages.filter(m => m.ts > since);
+        // ── LEAVE ──
+        if (action === 'leave') {
+            const { roomCode, memberId } = data;
+            if (roomCode && memberId) {
+                const room = getRoom(roomCode);
+                if (room) room.members.delete(memberId);
+            }
+            return ok({ ok: true });
+        }
 
-        res.writeHead(200, headers);
-        return res.end(JSON.stringify({
-            room: roomCode,
-            members: activeCount,
-            messages: newMessages,
-            ts: now,
-        }));
-    }
+        // ── HEARTBEAT ──
+        if (action === 'heartbeat') {
+            const { roomCode, memberId } = data;
+            if (!roomCode || !memberId) return err(400, 'Missing roomCode or memberId');
+            const room = getRoom(roomCode);
+            if (!room) return err(404, 'Room not found');
 
-    // Unknown method
-    res.writeHead(405, headers);
-    res.end(JSON.stringify({ error: 'Method not allowed' }));
+            if (room.members.has(memberId)) {
+                room.members.get(memberId).lastSeen = Date.now();
+            }
+
+            return ok({ ok: true, members: activeMembers(room) });
+        }
+
+        return err(400, 'Unknown action: ' + action);
+    });
 }
