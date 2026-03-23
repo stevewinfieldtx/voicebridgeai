@@ -63,6 +63,8 @@
     let watchdogInterval = null;
     let currentFrom = '';
     let currentTo = '';
+    let lastUserSpeechTime = 0;           // tracks when user last spoke
+    const IDLE_SUPPRESS_MS = 8000;        // suppress agent if no user speech for 8s
 
     // ---- Populate Language Selects ----
     LANGS.forEach(lang => {
@@ -293,11 +295,17 @@
             case 'user_transcript':
                 // What the user said (recognized speech)
                 if (msg.user_transcript_event?.user_transcript) {
+                    lastUserSpeechTime = Date.now();
                     addTranscriptLine(msg.user_transcript_event.user_transcript, 'user');
                 }
                 break;
 
             case 'agent_response':
+                // Suppress idle chatter (e.g. "Are you there?")
+                if (Date.now() - lastUserSpeechTime > IDLE_SUPPRESS_MS) {
+                    console.log('Suppressed idle agent response:', msg.agent_response_event?.agent_response);
+                    break;
+                }
                 // The agent's text response (translation)
                 if (msg.agent_response_event?.agent_response) {
                     addTranscriptLine(msg.agent_response_event.agent_response, 'agent');
@@ -305,6 +313,10 @@
                 break;
 
             case 'audio':
+                // Suppress audio when no recent user speech
+                if (Date.now() - lastUserSpeechTime > IDLE_SUPPRESS_MS) {
+                    break;
+                }
                 // Audio chunk from agent — decode PCM and play
                 if (msg.audio_event?.audio_base_64) {
                     playPcmChunk(msg.audio_event.audio_base_64);
