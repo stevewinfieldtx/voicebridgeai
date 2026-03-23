@@ -63,7 +63,7 @@ module.exports = async function handler(req, res) {
                 },
                 body: JSON.stringify({
                     text: safeText,
-                    model_id: 'eleven_multilingual_v2',
+                    model_id: 'eleven_flash_v2_5',
                     language_code: elLang,
                     voice_settings: {
                         stability: 0.5,

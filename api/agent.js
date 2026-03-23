@@ -17,13 +17,7 @@ const LANGUAGE_NAMES = {
     zh: 'Chinese', ja: 'Japanese', ko: 'Korean', th: 'Thai',
 };
 
-// Map our language codes to ElevenLabs language codes
-const ELEVENLABS_LANG = {
-    en: 'en', vi: 'vi', es: 'es', fr: 'fr',
-    de: 'de', it: 'it', pt: 'pt', nl: 'nl',
-    ru: 'ru', uk: 'uk', ar: 'ar', hi: 'hi',
-    zh: 'zh', ja: 'ja', ko: 'ko', th: 'th',
-};
+
 
 module.exports = async (req, res) => {
     // CORS
@@ -37,14 +31,20 @@ module.exports = async (req, res) => {
         return res.status(500).json({ error: 'ELEVENLABS_API_KEY not configured' });
     }
 
-    const from = req.query.from || 'en';
-    const to = req.query.to || 'vi';
+    const from   = req.query.from   || 'en';
+    const to     = req.query.to     || 'vi';
+    const gender = req.query.gender === 'male' ? 'male' : 'female';
+
+    // ElevenLabs multilingual voice IDs
+    const VOICE_ID = gender === 'male'
+        ? 'nPczCjzI2devNBz1zQrb'   // Brian — natural US male
+        : 'EXAVITQu4vr4xnSDxMaL';  // Aria  — natural US female
 
     if (!LANGUAGE_NAMES[from] || !LANGUAGE_NAMES[to]) {
         return res.status(400).json({ error: 'Unsupported language code' });
     }
 
-    const cacheKey = `${from}|${to}`;
+    const cacheKey = `${from}|${to}|${gender}`;
     const langA = LANGUAGE_NAMES[from];
     const langB = LANGUAGE_NAMES[to];
 
@@ -53,7 +53,7 @@ module.exports = async (req, res) => {
         let agentId = getCachedAgent(cacheKey);
 
         if (!agentId) {
-            agentId = await createAgent(API_KEY, from, to, langA, langB);
+            agentId = await createAgent(API_KEY, from, to, langA, langB, VOICE_ID);
             agentCache[cacheKey] = { agentId, createdAt: Date.now() };
         }
 
@@ -87,7 +87,7 @@ function getCachedAgent(key) {
     return cached.agentId;
 }
 
-async function createAgent(apiKey, fromCode, toCode, langA, langB) {
+async function createAgent(apiKey, fromCode, toCode, langA, langB, voiceId) {
     const systemPrompt = `You are a real-time bidirectional voice translator between ${langA} and ${langB}.
 
 YOUR ONE AND ONLY JOB: detect which language the user is speaking, then respond with the translation in THE OTHER language.
@@ -121,14 +121,13 @@ SILENCE RULES:
                     prompt: systemPrompt,
                 },
                 first_message: '',
-                language: ELEVENLABS_LANG[fromCode] || 'en',
             },
             turn: {
                 mode: 'turn',
                 silence_end_call_timeout: 600,  // 10 min before auto-disconnect
             },
             tts: {
-                voice_id: 'EXAVITQu4vr4xnSDxMaL',  // Aria
+                voice_id: voiceId,
             },
         },
     };

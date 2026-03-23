@@ -11,11 +11,11 @@
     const LANGS = [
         { code: 'en',  name: 'English',    flag: '🇺🇸' },
         { code: 'vi',  name: 'Tiếng Việt', flag: '🇻🇳' },
-        { code: 'es',  name: 'Español',    flag: '🇪🇸' },
+        { code: 'es',  name: 'Español',    flag: '🇲🇽' },
         { code: 'fr',  name: 'Français',   flag: '🇫🇷' },
         { code: 'de',  name: 'Deutsch',    flag: '🇩🇪' },
         { code: 'it',  name: 'Italiano',   flag: '🇮🇹' },
-        { code: 'pt',  name: 'Português',  flag: '🇧🇷' },
+        { code: 'pt',  name: 'Português (BR)', flag: '🇧🇷' },
         { code: 'nl',  name: 'Nederlands', flag: '🇳🇱' },
         { code: 'ru',  name: 'Русский',    flag: '🇷🇺' },
         { code: 'uk',  name: 'Українська', flag: '🇺🇦' },
@@ -35,6 +35,9 @@
     const statusText     = document.getElementById('status-text');
     const transcript     = document.getElementById('transcript');
     const backLink       = document.getElementById('back-link');
+    const genderFemale   = document.getElementById('gender-female');
+    const genderMale     = document.getElementById('gender-male');
+    const genderBtns     = [genderFemale, genderMale];
 
     // ---- State ----
     let ws = null;
@@ -45,6 +48,7 @@
     let processorNode = null;
     let isActive = false;
     let isAgentSpeaking = false;
+    let selectedGender = localStorage.getItem('vb-gender') || 'female';
 
     // Audio scheduling state
     let nextPlayTime = 0;          // AudioContext.currentTime of next chunk
@@ -60,6 +64,20 @@
     // Load saved preferences
     langFromSelect.value = localStorage.getItem('vb-live-from') || 'en';
     langToSelect.value   = localStorage.getItem('vb-live-to') || 'vi';
+
+    // Apply saved gender
+    genderBtns.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.gender === selectedGender);
+    });
+
+    // Gender toggle logic
+    genderBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            selectedGender = btn.dataset.gender;
+            localStorage.setItem('vb-gender', selectedGender);
+            genderBtns.forEach(b => b.classList.toggle('active', b === btn));
+        });
+    });
 
     // ---- Button Click ----
     startBtn.addEventListener('click', () => {
@@ -92,10 +110,11 @@
         startBtn.disabled = true;
         langFromSelect.disabled = true;
         langToSelect.disabled = true;
+        genderBtns.forEach(b => b.disabled = true);
 
         try {
             // Step 1: Get signed WebSocket URL from our server
-            const resp = await fetch(`/api/agent?from=${from}&to=${to}`);
+        const resp = await fetch(`/api/agent?from=${from}&to=${to}&gender=${selectedGender}`);
             if (!resp.ok) {
                 const err = await resp.json();
                 throw new Error(err.error || 'Server error');
@@ -374,6 +393,7 @@
         startBtn.classList.remove('active');
         langFromSelect.disabled = false;
         langToSelect.disabled = false;
+        genderBtns.forEach(b => b.disabled = false);
     }
 
     function setStatus(state, text) {

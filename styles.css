@@ -144,7 +144,11 @@ body::before {
 .settings-btn:hover {
     background: rgba(255, 255, 255, 0.08);
     color: var(--text-primary);
-    transform: translateY(-50%) rotate(45deg);
+    transform: rotate(45deg);
+}
+/* Dots (⋯) button — no rotation, subtle scale */
+.settings-btn--dots:hover {
+    transform: scale(1.15);
 }
 
 /* ---- SETTINGS PANEL ---- */
