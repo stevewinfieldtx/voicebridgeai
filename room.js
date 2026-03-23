@@ -169,6 +169,10 @@
                         toLang,
                         { remote: true }
                     );
+                    // Auto-play the translated text on the remote device
+                    if (msg.translatedText && toLang) {
+                        window._vb.speak(msg.translatedText, toLang.tts);
+                    }
                 }
             }
         } catch (e) {

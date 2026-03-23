@@ -138,16 +138,18 @@
         }
     }
 
-    // ---- Text-to-Speech (Native Web Speech API) ----
+    // ---- Text-to-Speech (ElevenLabs via /api/tts) ----
 
-    function getBestVoice(ttsCode) {
-        const voices = window.speechSynthesis.getVoices();
-        return (
-            voices.find(v => v.name.toLowerCase().includes('google') && v.lang === ttsCode) ||
-            voices.find(v => v.lang === ttsCode) ||
-            voices.find(v => v.lang.startsWith(ttsCode.slice(0, 2))) ||
-            null
-        );
+    function resumeMicAfterTTS() {
+        isSpeaking = false;
+        if (isListening) {
+            setTimeout(() => {
+                recognition = createRecognition();
+                if (recognition) {
+                    try { recognition.start(); } catch (e) { /* ok */ }
+                }
+            }, 300);
+        }
     }
 
     function speak(text, ttsCode) {
@@ -155,42 +157,37 @@
         if (ttsAudio) { ttsAudio.pause(); ttsAudio.src = ''; ttsAudio = null; }
         if (window.speechSynthesis) window.speechSynthesis.cancel();
 
-        if (!window.speechSynthesis) { isSpeaking = false; return; }
+        if (!text) { isSpeaking = false; return; }
 
         isSpeaking = true;
 
-        const utter = new SpeechSynthesisUtterance(text);
-        utter.lang  = ttsCode;
-        utter.rate  = voicePrefs.speed;
-        utter.pitch = voicePrefs.pitch;
-        const voice = getBestVoice(ttsCode);
-        if (voice) utter.voice = voice;
+        // Build server TTS URL
+        const params = new URLSearchParams({ text, lang: ttsCode });
+        const url = `/api/tts?${params.toString()}`;
 
-        utter.onend = () => {
-            isSpeaking = false;
-            // Resume recognition after TTS finishes
-            if (isListening) {
-                setTimeout(() => {
-                    recognition = createRecognition();
-                    if (recognition) {
-                        try { recognition.start(); } catch (e) { /* ok */ }
-                    }
-                }, 300);
-            }
-        };
-        utter.onerror = () => {
-            isSpeaking = false;
-            if (isListening) {
-                setTimeout(() => {
-                    recognition = createRecognition();
-                    if (recognition) {
-                        try { recognition.start(); } catch (e) { /* ok */ }
-                    }
-                }, 300);
+        ttsAudio = new Audio(url);
+        ttsAudio.onended = resumeMicAfterTTS;
+        ttsAudio.onerror = () => {
+            // Fallback to browser TTS if server fails
+            console.warn('ElevenLabs TTS failed, falling back to browser TTS');
+            ttsAudio = null;
+            if (window.speechSynthesis) {
+                const utter = new SpeechSynthesisUtterance(text);
+                utter.lang = ttsCode;
+                utter.rate = voicePrefs.speed;
+                utter.pitch = voicePrefs.pitch;
+                utter.onend = resumeMicAfterTTS;
+                utter.onerror = resumeMicAfterTTS;
+                window.speechSynthesis.speak(utter);
+            } else {
+                resumeMicAfterTTS();
             }
         };
 
-        window.speechSynthesis.speak(utter);
+        ttsAudio.play().catch(() => {
+            // Autoplay blocked or network error — try fallback
+            ttsAudio.onerror();
+        });
     }
 
     // ---- Voice Settings Panel ----
@@ -290,6 +287,7 @@
         return row;
     };
     window._vb.getLang = getLang;
+    window._vb.speak = speak;          // room.js uses this for auto-play
     // Hook: called after every local translate+speak so room can broadcast
     window._vb.onLocalMessage = null;   // room.js sets this
 
