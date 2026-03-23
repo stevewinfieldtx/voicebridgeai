@@ -40,6 +40,10 @@
             justify-content: center;
             position: relative;
         }
+        /* Back link hidden when this IS the main page */
+        .live-back {
+            display: none;
+        }
 
         .live-logo {
             display: flex;
@@ -284,9 +288,18 @@
 <body>
     <div class="live-container">
 
-        <!-- Header -->
+        <!-- Header — brand-matched with main app -->
         <header class="live-header">
             <div class="live-header-row">
+                <!-- back-link kept in DOM (hidden) so live.js doesn't crash -->
+                <a href="#" class="live-back" id="back-link" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M15 18l-6-6 6-6"/>
+                    </svg>
+                    Back
+                </a>
+
                 <div>
                     <div class="live-logo">
                         <svg class="logo-icon" width="26" height="26" viewBox="0 0 40 40" fill="none">
@@ -302,7 +315,7 @@
                         </svg>
                         <h1>TalkBridge</h1>
                     </div>
-                    <p class="live-tagline">Two people · one phone · real-time AI</p>
+                    <p class="live-tagline">Two people · one phone · real-time AI translation</p>
                 </div>
             </div>
         </header>
@@ -361,11 +374,5 @@
     </div>
 
     <script src="live.js?v=1"></script>
-    <script>
-        // Register Service Worker for PWA
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js').catch(() => {});
-        }
-    </script>
 </body>
 </html>
