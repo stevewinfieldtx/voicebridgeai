@@ -39,13 +39,17 @@
     // ---- State ----
     let ws = null;
     let mediaStream = null;
-    let audioContext = null;
+    let audioContext = null;   // for mic capture
+    let playbackCtx = null;    // for playing agent audio
     let sourceNode = null;
     let processorNode = null;
     let isActive = false;
     let isAgentSpeaking = false;
-    let audioQueue = [];
-    let isPlayingAudio = false;
+
+    // Audio scheduling state
+    let nextPlayTime = 0;          // AudioContext.currentTime of next chunk
+    let scheduledSources = [];     // active AudioBufferSourceNodes
+    const AGENT_SAMPLE_RATE = 16000;  // ElevenLabs output PCM sample rate
 
     // ---- Populate Language Selects ----
     LANGS.forEach(lang => {
@@ -111,7 +115,13 @@
                 },
             });
 
-            // Step 3: Connect WebSocket to ElevenLabs
+            // Step 3: Create playback audio context
+            playbackCtx = new (window.AudioContext || window.webkitAudioContext)({
+                sampleRate: AGENT_SAMPLE_RATE,
+            });
+            nextPlayTime = 0;
+
+            // Step 4: Connect WebSocket to ElevenLabs
             connectWebSocket(signedUrl);
 
         } catch (err) {
@@ -181,9 +191,9 @@
                 break;
 
             case 'audio':
-                // Audio chunk from agent — queue and play
+                // Audio chunk from agent — decode PCM and play
                 if (msg.audio_event?.audio_base_64) {
-                    queueAudio(msg.audio_event.audio_base_64);
+                    playPcmChunk(msg.audio_event.audio_base_64);
                 }
                 break;
 
@@ -253,61 +263,67 @@
         processorNode.connect(audioContext.destination);
     }
 
-    // ---- Audio Playback (Agent → Speaker) ----
-    function queueAudio(base64Audio) {
-        audioQueue.push(base64Audio);
-        if (!isPlayingAudio) {
-            playNextAudio();
-        }
-    }
+    // ---- Audio Playback via AudioContext (PCM → Speaker) ----
+    // ElevenLabs sends base64-encoded 16-bit signed PCM at 16kHz.
+    // We decode each chunk, convert Int16→Float32, create an
+    // AudioBuffer, and schedule it for gapless playback.
 
-    async function playNextAudio() {
-        if (audioQueue.length === 0) {
-            isPlayingAudio = false;
-            isAgentSpeaking = false;
-            setStatus('active', 'Listening…');
-            return;
+    function playPcmChunk(base64Audio) {
+        if (!playbackCtx) return;
+
+        // Update status
+        if (!isAgentSpeaking) {
+            isAgentSpeaking = true;
+            setStatus('speaking', 'Translating…');
         }
 
-        isPlayingAudio = true;
-        isAgentSpeaking = true;
-        setStatus('speaking', 'Translating…');
+        // Decode base64 → Uint8Array → Int16Array
+        const binaryString = atob(base64Audio);
+        const rawBytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+            rawBytes[i] = binaryString.charCodeAt(i);
+        }
+        const int16 = new Int16Array(rawBytes.buffer);
 
-        const base64 = audioQueue.shift();
+        // Convert Int16 → Float32 (range -1.0 to 1.0)
+        const float32 = new Float32Array(int16.length);
+        for (let i = 0; i < int16.length; i++) {
+            float32[i] = int16[i] / 32768;
+        }
 
-        try {
-            // Decode base64 to binary
-            const binaryString = atob(base64);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
+        // Create AudioBuffer
+        const audioBuffer = playbackCtx.createBuffer(1, float32.length, AGENT_SAMPLE_RATE);
+        audioBuffer.getChannelData(0).set(float32);
+
+        // Schedule for gapless playback
+        const source = playbackCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(playbackCtx.destination);
+
+        const now = playbackCtx.currentTime;
+        const startTime = Math.max(now, nextPlayTime);
+        source.start(startTime);
+        nextPlayTime = startTime + audioBuffer.duration;
+
+        // Track this source so we can stop it on interruption
+        scheduledSources.push(source);
+        source.onended = () => {
+            scheduledSources = scheduledSources.filter(s => s !== source);
+            // If no more sources are queued, agent is done speaking
+            if (scheduledSources.length === 0) {
+                isAgentSpeaking = false;
+                setStatus('active', 'Listening…');
             }
-
-            // Try to play as MP3/PCM via Audio element
-            const blob = new Blob([bytes], { type: 'audio/mpeg' });
-            const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
-
-            audio.onended = () => {
-                URL.revokeObjectURL(url);
-                playNextAudio();
-            };
-
-            audio.onerror = () => {
-                URL.revokeObjectURL(url);
-                playNextAudio();
-            };
-
-            await audio.play();
-        } catch (err) {
-            console.warn('Audio playback error:', err);
-            playNextAudio();
-        }
+        };
     }
 
     function stopCurrentAudio() {
-        audioQueue = [];
-        isPlayingAudio = false;
+        // Stop all scheduled audio sources
+        scheduledSources.forEach(s => {
+            try { s.stop(); } catch (_) { /* already stopped */ }
+        });
+        scheduledSources = [];
+        nextPlayTime = 0;
         isAgentSpeaking = false;
     }
 
@@ -321,7 +337,7 @@
             ws = null;
         }
 
-        // Stop mic
+        // Stop mic capture
         if (processorNode) {
             processorNode.disconnect();
             processorNode = null;
@@ -339,7 +355,13 @@
             mediaStream = null;
         }
 
+        // Stop playback
         stopCurrentAudio();
+        if (playbackCtx) {
+            playbackCtx.close();
+            playbackCtx = null;
+        }
+
         resetControls();
         setStatus('idle', 'Ready');
         addTranscriptLine('⏹ Session ended', 'system');
