@@ -124,7 +124,7 @@ SILENCE RULES:
                 language: ELEVENLABS_LANG[fromCode] || 'en',
             },
             turn: {
-                mode: 'turn_based',
+                mode: 'turn',
                 silence_end_call_timeout: 600,  // 10 min before auto-disconnect
             },
             tts: {
