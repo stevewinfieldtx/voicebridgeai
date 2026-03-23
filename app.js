@@ -123,18 +123,33 @@
     }
 
     async function translateText(text, fromLang, toLang) {
-        const pair = `${fromLang.memory}|${toLang.memory}`;
-        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${pair}`;
+        // Google Translate free endpoint — strictly translates, never responds conversationally.
+        // dt=t returns only translation segments; sl/tl are ISO-639-1 codes.
+        const sl  = fromLang.memory.split('-')[0];  // e.g. "en-US" → "en"
+        const tl  = toLang.memory.split('-')[0];
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
         try {
             const res = await fetch(url);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            if (data.responseStatus === 200 && data.responseData) {
-                return data.responseData.translatedText;
-            }
-            throw new Error(data.responseDetails || 'Translation failed');
+            // Google returns: [ [ ["translated","original",...]  ], ... ]
+            const translated = data[0]
+                .filter(seg => seg && seg[0])
+                .map(seg => seg[0])
+                .join('');
+            if (!translated) throw new Error('Empty translation');
+            return translated;
         } catch (err) {
             console.error('Translation error:', err);
+            // Fallback: MyMemory
+            try {
+                const pair = `${fromLang.memory}|${toLang.memory}`;
+                const fb = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${pair}`);
+                if (fb.ok) {
+                    const d = await fb.json();
+                    if (d.responseStatus === 200 && d.responseData?.translatedText) return d.responseData.translatedText;
+                }
+            } catch (_) { /* ignore fallback errors */ }
             return `[Error: ${err.message}]`;
         }
     }
