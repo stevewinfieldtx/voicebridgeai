@@ -150,6 +150,7 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
             },
             tts: {
                 voice_id: voiceId,
+                model_id: 'eleven_flash_v2_5',
             },
         },
     };
