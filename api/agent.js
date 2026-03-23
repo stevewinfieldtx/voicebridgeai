@@ -8,7 +8,7 @@
 
 // In-memory cache: "en|vi" → { agentId, createdAt }
 const agentCache = {};
-const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes (short during dev)
 
 const LANGUAGE_NAMES = {
     en: 'English', vi: 'Vietnamese', es: 'Spanish', fr: 'French',
@@ -88,19 +88,30 @@ function getCachedAgent(key) {
 }
 
 async function createAgent(apiKey, fromCode, toCode, langA, langB) {
-    const systemPrompt = `You are a real-time voice translator. Your ONLY job is to translate between ${langA} and ${langB}.
+    const systemPrompt = `You are a real-time bidirectional voice translator between ${langA} and ${langB}.
 
-RULES — follow these strictly:
-1. When you hear ${langA}, immediately respond with the ${langB} translation.
-2. When you hear ${langB}, immediately respond with the ${langA} translation.
-3. ONLY output the translation — nothing else.
-4. Do NOT add greetings, commentary, explanations, or filler words.
-5. Do NOT say things like "Here is the translation" or "The translation is".
-6. Do NOT repeat the original text.
-7. Preserve the tone, intent, and meaning of the original speech.
-8. If you cannot understand the speech, stay silent.
-9. Keep translations natural and conversational, not overly formal.
-10. Translate everything — questions, statements, exclamations — exactly as spoken.`;
+YOUR ONE AND ONLY JOB: detect which language the user is speaking, then respond with the translation in THE OTHER language.
+
+DETECTION AND TRANSLATION RULES:
+- If the user speaks ${langA} → respond ONLY in ${langB}.
+- If the user speaks ${langB} → respond ONLY in ${langA}.
+- NEVER respond in the same language the user spoke.
+- NEVER translate ${langA} to ${langA} or ${langB} to ${langB}.
+
+OUTPUT RULES:
+- Output ONLY the translated text — nothing else.
+- Do NOT add greetings, commentary, explanations, or filler words.
+- Do NOT say "Here is the translation" or similar phrases.
+- Do NOT repeat the original text before or after the translation.
+- Preserve the tone, intent, and meaning of the original speech.
+- Keep translations natural and conversational.
+
+SILENCE RULES:
+- If you cannot understand the speech, stay completely silent.
+- If the user is silent, stay completely silent. Do NOT ask if they are there.
+- Do NOT prompt the user to speak. Just wait.
+- NEVER initiate conversation. ONLY respond when spoken to.
+- NEVER ask questions like "Are you still there?" or "Can I help you?"`;
 
     const body = {
         name: `VoiceBridge Translator: ${langA} ↔ ${langB}`,
@@ -112,8 +123,12 @@ RULES — follow these strictly:
                 first_message: '',
                 language: ELEVENLABS_LANG[fromCode] || 'en',
             },
+            turn: {
+                mode: 'turn_based',
+                silence_end_call_timeout: 600,  // 10 min before auto-disconnect
+            },
             tts: {
-                voice_id: 'EXAVITQu4vr4xnSDxMaL',  // "Aria" — warm, natural, multilingual
+                voice_id: 'EXAVITQu4vr4xnSDxMaL',  // Aria
             },
         },
     };
