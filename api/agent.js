@@ -142,7 +142,7 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
                     temperature: 0.1,
                 },
                 first_message: '',
-                language: fromCode,
+                language: '',
             },
             turn: {
                 mode: 'turn',
@@ -151,7 +151,7 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
             },
             tts: {
                 voice_id: voiceId,
-                model_id: 'eleven_turbo_v2',
+                model_id: 'eleven_flash_v2_5',
                 optimize_streaming_latency: 4,
             },
         },
