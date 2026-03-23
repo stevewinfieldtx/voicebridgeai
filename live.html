@@ -247,27 +247,82 @@
         .transcript-empty svg { width: 36px; height: 36px; }
         .transcript-empty p   { font-size: 0.82rem; }
 
-        .transcript-line {
-            font-size: 0.87rem;
-            line-height: 1.6;
+        /* Column headers */
+        .live-col-headers {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            padding: 0 0 6px;
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: var(--bg-card);
+        }
+        .live-col-header {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
             padding: 8px 12px;
             border-radius: var(--radius-sm);
-            animation: msgIn 0.3s ease-out;
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
+        .live-col-header.from-col {
+            color: var(--accent-en);
+            background: var(--accent-en-dim, rgba(108,159,255,0.08));
+            border-bottom: 2px solid rgba(108, 159, 255, 0.2);
+        }
+        .live-col-header.to-col {
+            color: var(--accent-vi);
+            background: var(--accent-vi-dim, rgba(255,101,132,0.08));
+            border-bottom: 2px solid rgba(255, 101, 132, 0.2);
+        }
+
+        /* Two-column message rows */
+        .msg-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 8px;
+            animation: msgIn 0.35s ease-out;
+        }
+        .msg-cell {
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 0.87rem;
+            line-height: 1.5;
+            word-break: break-word;
+            min-height: 36px;
+        }
+        .msg-cell.is-source {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+        }
+        .msg-cell.is-translation {
+            font-weight: 500;
+        }
+        .msg-cell.col-from {
+            border-left: 3px solid rgba(108, 159, 255, 0.3);
+        }
+        .msg-cell.col-to {
+            background: rgba(255, 101, 132, 0.08);
+            border: 1px solid rgba(255, 101, 132, 0.12);
+            color: #ffb0c0;
+        }
+        .msg-cell.empty {
+            opacity: 0.15;
+            border: 1px dashed var(--border-subtle);
+        }
+
         @keyframes msgIn {
             from { opacity: 0; transform: translateY(6px); }
             to   { opacity: 1; transform: translateY(0); }
         }
-        .transcript-line.user {
-            background: rgba(108, 159, 255, 0.08);
-            border-left: 3px solid rgba(108, 159, 255, 0.45);
-            color: var(--text-primary);
-        }
-        .transcript-line.agent {
-            background: rgba(255, 101, 132, 0.08);
-            border-left: 3px solid rgba(255, 101, 132, 0.45);
-            color: var(--text-primary);
-        }
+
+        /* System / error lines span full width */
         .transcript-line.system {
             color: var(--text-muted);
             font-size: 0.76rem;
@@ -362,6 +417,10 @@
 
         <!-- Transcript -->
         <div class="live-transcript" id="transcript">
+            <div class="live-col-headers" id="col-headers" style="display:none;">
+                <div class="live-col-header from-col" id="col-header-from">🗣️ Source</div>
+                <div class="live-col-header to-col" id="col-header-to">🌐 Translation</div>
+            </div>
             <div class="transcript-empty" id="transcript-empty">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"
                      stroke-linecap="round">

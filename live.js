@@ -65,6 +65,7 @@
     let currentTo = '';
     let lastUserSpeechTime = 0;           // tracks when user last spoke
     const IDLE_SUPPRESS_MS = 8000;        // suppress agent if no user speech for 8s
+    let pendingRow = null;                // current msg-row awaiting translation
 
     // ---- Populate Language Selects ----
     LANGS.forEach(lang => {
@@ -178,6 +179,11 @@
         // Always fetch a fresh signed URL for each connection
         const { signedUrl, languages } = await fetchSignedUrl();
         if (reconnectAttempts === 0) {
+            // Update column headers with language names
+            const colFrom = document.getElementById('col-header-from');
+            const colTo = document.getElementById('col-header-to');
+            if (colFrom) colFrom.textContent = `🗣️ ${languages.a}`;
+            if (colTo) colTo.textContent = `🌐 ${languages.b}`;
             addTranscriptLine(`🔗 Agent ready: ${languages.a} ↔ ${languages.b}`, 'system');
         } else {
             addTranscriptLine(`🔄 Reconnected (attempt ${reconnectAttempts})`, 'system');
@@ -518,20 +524,72 @@
     }
 
     function addTranscriptLine(text, type) {
-        const div = document.createElement('div');
-        div.className = `transcript-line ${type}`;
+        const empty = document.getElementById('transcript-empty');
+        if (empty) empty.style.display = 'none';
 
-        const prefix = type === 'user' ? '🗣️ ' :
-                       type === 'agent' ? '🌐 ' : '';
-        div.textContent = prefix + text;
-        transcript.appendChild(div);
+        // Show column headers on first real message
+        const colHeaders = document.getElementById('col-headers');
+        if (colHeaders) colHeaders.style.display = '';
+
+        if (type === 'user') {
+            // Create a new two-column row: source on left, translation pending on right
+            const row = document.createElement('div');
+            row.className = 'msg-row';
+
+            const sourceCell = document.createElement('div');
+            sourceCell.className = 'msg-cell is-source col-from';
+            sourceCell.textContent = text;
+
+            const transCell = document.createElement('div');
+            transCell.className = 'msg-cell is-translation col-to empty';
+            transCell.textContent = '…';
+
+            row.appendChild(sourceCell);
+            row.appendChild(transCell);
+            transcript.appendChild(row);
+            pendingRow = row;
+        } else if (type === 'agent') {
+            // Fill the translation cell in the pending row
+            if (pendingRow) {
+                const transCell = pendingRow.querySelector('.msg-cell.is-translation');
+                if (transCell) {
+                    transCell.textContent = text;
+                    transCell.classList.remove('empty');
+                }
+                pendingRow = null;
+            } else {
+                // No pending row — create a standalone row with translation on right
+                const row = document.createElement('div');
+                row.className = 'msg-row';
+                const emptyCell = document.createElement('div');
+                emptyCell.className = 'msg-cell is-source col-from empty';
+                emptyCell.textContent = '';
+                const transCell = document.createElement('div');
+                transCell.className = 'msg-cell is-translation col-to';
+                transCell.textContent = text;
+                row.appendChild(emptyCell);
+                row.appendChild(transCell);
+                transcript.appendChild(row);
+            }
+        } else {
+            // System / error — full-width line
+            const div = document.createElement('div');
+            div.className = `transcript-line ${type}`;
+            div.textContent = text;
+            transcript.appendChild(div);
+        }
         transcript.scrollTop = transcript.scrollHeight;
     }
 
     function updateLastAgentLine(text) {
-        const lines = transcript.querySelectorAll('.transcript-line.agent');
-        if (lines.length > 0) {
-            lines[lines.length - 1].textContent = '🌐 ' + text;
+        const rows = transcript.querySelectorAll('.msg-row');
+        if (rows.length > 0) {
+            const lastRow = rows[rows.length - 1];
+            const transCell = lastRow.querySelector('.msg-cell.is-translation');
+            if (transCell) {
+                transCell.textContent = text;
+                transCell.classList.remove('empty');
+            }
         }
     }
 
