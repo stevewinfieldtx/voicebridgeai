@@ -46,6 +46,7 @@
     let recognition = null;
     let ttsUnlocked = false;
     let ttsAudio = null;
+    let lastSpokenText = '';   // fingerprint of last TTS output — used to reject echo
 
     // ---- Voice Settings State ----
     const voicePrefs = loadVoicePrefs();
@@ -143,13 +144,36 @@
     function resumeMicAfterTTS() {
         isSpeaking = false;
         if (isListening) {
+            // 1500 ms gives room reverb and speaker ring-down time to fully decay
+            // before the mic goes live again — prevents the echo-translate loop.
             setTimeout(() => {
+                if (isSpeaking) return; // another TTS started in the meantime
                 recognition = createRecognition();
                 if (recognition) {
                     try { recognition.start(); } catch (e) { /* ok */ }
                 }
-            }, 300);
+            }, 1500);
         }
+    }
+
+    // Fuzzy echo guard: returns true if transcript is too similar to what we just spoke.
+    // Normalises both strings and checks for substring or high char-overlap.
+    function isEchoOfTTS(transcript) {
+        if (!lastSpokenText) return false;
+        const norm = s => s.toLowerCase().replace(/[^a-z0-9\u00C0-\u024F\u0100-\u017F]/g, ' ').replace(/\s+/g, ' ').trim();
+        const a = norm(transcript);
+        const b = norm(lastSpokenText);
+        if (!a || !b) return false;
+        // Substring match
+        if (b.includes(a) || a.includes(b)) return true;
+        // Character-overlap ratio (rough Jaccard on trigrams)
+        const tri = s => new Set([...Array(Math.max(0,s.length-2))].map((_,i)=>s.slice(i,i+3)));
+        const tA = tri(a), tB = tri(b);
+        if (!tA.size || !tB.size) return false;
+        let intersection = 0;
+        tA.forEach(t => { if (tB.has(t)) intersection++; });
+        const union = tA.size + tB.size - intersection;
+        return (intersection / union) >= 0.55;
     }
 
     function speak(text, ttsCode) {
@@ -158,6 +182,16 @@
         if (window.speechSynthesis) window.speechSynthesis.cancel();
 
         if (!text) { isSpeaking = false; return; }
+
+        // Store fingerprint so onresult can reject echoes
+        lastSpokenText = text;
+
+        // Kill mic immediately — don't wait for onresult's isSpeaking check
+        if (recognition) {
+            const old = recognition;
+            recognition = null;
+            try { old.abort(); } catch (e) { /* ok */ }
+        }
 
         isSpeaking = true;
 
@@ -316,6 +350,16 @@
             if (rec !== recognition) return;
             if (isSpeaking) return;
             if (processed) return;  // already handled this utterance
+
+            // Collect all text first so we can echo-check before deciding to translate
+            let allText = '';
+            for (let i = 0; i < event.results.length; i++) {
+                allText += event.results[i][0].transcript;
+            }
+            if (isEchoOfTTS(allText)) {
+                // This transcript looks like our own TTS output — silently discard
+                return;
+            }
 
             let interim = '';
             let finalText = '';
