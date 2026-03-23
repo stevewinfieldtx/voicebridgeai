@@ -509,15 +509,17 @@
         speedValue      = document.getElementById('speed-value');
         pitchValue      = document.getElementById('pitch-value');
 
-        // QR Share DOM
+        // QR Share DOM (optional — QR is embedded in settings panel, no standalone overlay needed)
         const shareBtn  = document.getElementById('share-btn');
         const qrOverlay = document.getElementById('qr-overlay');
         const qrClose   = document.getElementById('qr-close');
-        const openQR    = () => qrOverlay.classList.add('open');
-        const closeQR   = () => qrOverlay.classList.remove('open');
-        shareBtn.addEventListener('click', openQR);
-        qrClose.addEventListener('click', closeQR);
-        qrOverlay.addEventListener('click', (e) => { if (e.target === qrOverlay) closeQR(); });
+        if (shareBtn && qrOverlay && qrClose) {
+            const openQR  = () => qrOverlay.classList.add('open');
+            const closeQR = () => qrOverlay.classList.remove('open');
+            shareBtn.addEventListener('click', openQR);
+            qrClose.addEventListener('click', closeQR);
+            qrOverlay.addEventListener('click', (e) => { if (e.target === qrOverlay) closeQR(); });
+        }
 
         // Build language dropdowns
         buildLangOptions(langFromSelect);
