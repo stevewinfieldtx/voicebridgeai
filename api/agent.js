@@ -147,7 +147,7 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
             turn: {
                 mode: 'turn',
                 turn_timeout: 3,
-                silence_end_call_timeout: 600,
+                silence_end_call_timeout: 60,
             },
             tts: {
                 voice_id: voiceId,
