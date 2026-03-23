@@ -1,5 +1,5 @@
 /* =========================================
-   VoiceBridge — Multi-Language Edition
+   TalkBridge — Multi-Language Edition
    ========================================= */
 
 (function () {

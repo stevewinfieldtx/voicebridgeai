@@ -1,6 +1,6 @@
 {
-    "name": "VoiceBridge — Travel Translator",
-    "short_name": "VoiceBridge",
+    "name": "TalkBridge — Travel Translator",
+    "short_name": "TalkBridge",
     "description": "Real-time voice translator for travelers. English ↔ Vietnamese.",
     "start_url": ".",
     "scope": ".",

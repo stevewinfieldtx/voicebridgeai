@@ -1,5 +1,5 @@
 /* =========================================
-   VoiceBridge — ElevenLabs Agent API
+   TalkBridge — ElevenLabs Agent API
    GET /api/agent?from=en&to=vi
    Creates (or reuses) an ElevenLabs Conversational AI agent
    configured as a strict translator, then returns a signed
@@ -114,7 +114,7 @@ SILENCE RULES:
 - NEVER ask questions like "Are you still there?" or "Can I help you?"`;
 
     const body = {
-        name: `VoiceBridge Translator: ${langA} ↔ ${langB}`,
+        name: `TalkBridge Translator: ${langA} ↔ ${langB}`,
         conversation_config: {
             agent: {
                 prompt: {

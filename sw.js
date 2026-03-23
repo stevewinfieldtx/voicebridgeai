@@ -1,11 +1,11 @@
 /* =========================================
-   VoiceBridge — Service Worker v3
+   TalkBridge — Service Worker v3
    Caches the app shell so it loads instantly
    and works offline (speech/translation still
    need network, but the UI is always ready).
    ========================================= */
 
-const CACHE_NAME = 'voicebridge-v4';
+const CACHE_NAME = 'talkbridge-v4';
 const APP_SHELL = [
     './',
     './index.html',

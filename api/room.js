@@ -1,5 +1,5 @@
 /**
- * VoiceBridge — Room Relay API
+ * TalkBridge — Room Relay API
  *
  * All requests are POST with JSON body containing an `action` field:
  *

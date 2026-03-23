@@ -1,5 +1,5 @@
 /* =========================================
-   VoiceBridge — Live Translate Mode
+   TalkBridge — Live Translate Mode
    Uses ElevenLabs Conversational AI agent
    for seamless bidirectional translation.
    ========================================= */
