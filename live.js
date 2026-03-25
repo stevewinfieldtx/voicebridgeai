@@ -31,6 +31,7 @@
     const IDLE_PATTERNS = [
         /are you (still )?there/i,
         /hello\??$/i,
+        /^hi\!?$/i,
         /how can i help/i,
         /what would you like/i,
         /can i help/i,
@@ -41,7 +42,13 @@
         /go ahead/i,
         /ready when you are/i,
         /still listening/i,
+        /do you need/i,
+        /what can i/i,
+        /how may i/i,
     ];
+
+    // Minimum response length — suppress very short utterances (stutters/breaths)
+    const MIN_RESPONSE_LEN = 2;
 
     // ---- DOM ----
     const $fromSelect   = document.getElementById('lang-from');
@@ -57,8 +64,8 @@
     // ---- State ----
     let ws = null;
     let mediaStream = null;
-    let micCtx = null;          // AudioContext for mic capture
-    let playCtx = null;         // AudioContext for playback
+    let micCtx = null;
+    let playCtx = null;
     let srcNode = null;
     let procNode = null;
     let active = false;
@@ -67,7 +74,7 @@
 
     // Audio scheduling
     let nextPlayTime = 0;
-    let scheduled = [];          // active AudioBufferSourceNodes
+    let scheduled = [];
     const PCM_RATE = 16000;
 
     // Reconnection
@@ -77,16 +84,20 @@
     let lastPong = 0;
     let watchdog = null;
 
-    // Session params
+    // Session params — which language is "English" and which is "other"
     let curFrom = '';
     let curTo = '';
+    let englishCode = '';   // whichever of from/to is 'en'
+    let otherCode = '';     // the non-English language
+    let otherName = '';     // display name for the other language
 
     // Idle suppression
     let lastSpeechAt = 0;
-    const IDLE_MS = 5000;       // suppress agent if no user speech for 5s
+    let suppressCurrent = false;
 
     // Transcript pairing
     let pendingRow = null;
+    let pendingIsEnglish = false; // was the pending user_transcript English?
 
     // ---- Init UI ----
     LANGS.forEach(l => {
@@ -108,6 +119,18 @@
     $startBtn.addEventListener('click',     () => active ? stop() : start());
 
     // =========================================================
+    //  LANGUAGE DETECTION (simple heuristic)
+    //  Used to determine which column text belongs in.
+    // =========================================================
+    function isLikelyEnglish(text) {
+        if (!text) return true;
+        // Count characters outside basic ASCII range
+        const nonAscii = text.replace(/[\x00-\x7F]/g, '').length;
+        // If less than 15% non-ASCII, likely English
+        return nonAscii / text.length < 0.15;
+    }
+
+    // =========================================================
     //  START SESSION
     // =========================================================
     async function start() {
@@ -117,9 +140,20 @@
 
         curFrom = from;
         curTo   = to;
+
+        // Determine which is English
+        if (from === 'en') {
+            englishCode = 'en';
+            otherCode = to;
+        } else {
+            englishCode = 'en';
+            otherCode = from === 'en' ? to : from;
+        }
+
         reconnects = 0;
         lastSpeechAt = 0;
         pendingRow = null;
+        suppressCurrent = false;
 
         setStatus('connecting', 'Connecting\u2026');
         lockUI(true);
@@ -149,9 +183,12 @@
     async function connect() {
         const { signedUrl, languages } = await fetchAgent();
 
+        // Find the other language name from the response
+        otherName = (curFrom === 'en') ? languages.b : languages.a;
+
         if (reconnects === 0) {
-            setColumnHeaders(languages.a, languages.b);
-            log(`Agent ready: ${languages.a} \u2194 ${languages.b}`, 'system');
+            setColumnHeaders(otherName);
+            log(`Agent ready: English \u2194 ${otherName}`, 'system');
         } else {
             log(`Reconnected (attempt ${reconnects})`, 'system');
         }
@@ -165,7 +202,7 @@
             active = true;
             reconnects = 0;
             setStatus('active', 'Listening\u2026');
-            lockUI(true);   // keep locked but enable stop btn
+            lockUI(true);
             $startBtn.disabled = false;
             $startBtn.querySelector('.btn-label').textContent = 'Stop';
             $startBtn.classList.add('active');
@@ -195,22 +232,21 @@
     // =========================================================
     //  HANDLE AGENT MESSAGES
     // =========================================================
-    // Track whether the current agent response should be suppressed
-    let suppressCurrent = false;
-
     function handleMsg(msg) {
         switch (msg.type) {
             case 'conversation_initiation_metadata':
-                console.log('[ws] session started', msg);
+                console.log('[ws] session started');
                 break;
 
             case 'user_transcript': {
                 const text = msg.user_transcript_event?.user_transcript;
                 console.log('[ws] user_transcript:', text);
-                if (text) {
+                if (text && text.trim().length >= MIN_RESPONSE_LEN) {
                     lastSpeechAt = Date.now();
                     suppressCurrent = false;
-                    addUserRow(text);
+                    const isEn = isLikelyEnglish(text);
+                    pendingIsEnglish = isEn;
+                    addTranscriptRow(text, null, isEn);
                 }
                 break;
             }
@@ -218,22 +254,21 @@
             case 'agent_response': {
                 const text = msg.agent_response_event?.agent_response;
                 console.log('[ws] agent_response:', text);
-                if (!text) break;
+                if (!text || text.trim().length < MIN_RESPONSE_LEN) break;
 
-                // Only suppress if it matches known idle chatter patterns
-                if (IDLE_PATTERNS.some(rx => rx.test(text))) {
+                // Suppress idle chatter patterns
+                if (IDLE_PATTERNS.some(rx => rx.test(text.trim()))) {
                     console.log('[suppress-pattern]', text);
                     suppressCurrent = true;
                     break;
                 }
 
                 suppressCurrent = false;
-                addAgentRow(text);
+                fillTranslation(text);
                 break;
             }
 
             case 'audio': {
-                // Only suppress audio if the current agent response was suppressed
                 if (suppressCurrent) break;
                 if (msg.audio_event?.audio_base_64) {
                     playChunk(msg.audio_event.audio_base_64);
@@ -255,12 +290,12 @@
 
             case 'agent_response_correction': {
                 const text = msg.agent_response_correction_event?.corrected_text;
-                if (text) updateLastAgent(text);
+                if (text) updateLastTranslation(text);
                 break;
             }
 
             default:
-                console.log('Agent:', msg.type);
+                console.log('[ws]', msg.type);
         }
     }
 
@@ -284,7 +319,6 @@
                 pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
             }
 
-            // base64 encode
             const bytes = new Uint8Array(pcm.buffer);
             let bin = '';
             for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
@@ -399,70 +433,101 @@
     }
 
     // =========================================================
-    //  TRANSCRIPT UI — Two-column layout
+    //  TRANSCRIPT UI — Two fixed columns
+    //  Left column = ALWAYS English
+    //  Right column = ALWAYS other language
     // =========================================================
-    function setColumnHeaders(langA, langB) {
+    function setColumnHeaders(otherLangName) {
         const hFrom = document.getElementById('col-header-from');
         const hTo   = document.getElementById('col-header-to');
-        if (hFrom) hFrom.textContent = `\uD83D\uDDE3\uFE0F ${langA}`;
-        if (hTo)   hTo.textContent   = `\uD83C\uDF10 ${langB}`;
+        if (hFrom) hFrom.textContent = '\uD83C\uDDFA\uD83C\uDDF8 English';
+        if (hTo)   hTo.textContent   = `\uD83C\uDF10 ${otherLangName}`;
     }
 
-    function addUserRow(text) {
+    /**
+     * Add a new transcript row.
+     * @param {string} text       - the user's spoken text
+     * @param {string|null} trans - translation (null = pending)
+     * @param {boolean} isEnglish - was the spoken text English?
+     */
+    function addTranscriptRow(text, trans, isEnglish) {
         hideEmpty();
 
         const row = document.createElement('div');
         row.className = 'msg-row';
 
-        const left = document.createElement('div');
-        left.className = 'msg-cell is-source col-from';
-        left.textContent = text;
+        const enCell = document.createElement('div');
+        const otherCell = document.createElement('div');
 
-        const right = document.createElement('div');
-        right.className = 'msg-cell is-translation col-to empty';
-        right.textContent = '\u2026';
+        if (isEnglish) {
+            // User spoke English → English text left, translation pending right
+            enCell.className = 'msg-cell col-from';
+            enCell.textContent = text;
+            otherCell.className = 'msg-cell col-to empty';
+            otherCell.textContent = '\u2026';
+        } else {
+            // User spoke other language → other text right, translation pending left
+            enCell.className = 'msg-cell col-from empty';
+            enCell.textContent = '\u2026';
+            otherCell.className = 'msg-cell col-to';
+            otherCell.textContent = text;
+        }
 
-        row.appendChild(left);
-        row.appendChild(right);
+        row.appendChild(enCell);
+        row.appendChild(otherCell);
         $transcript.appendChild(row);
         pendingRow = row;
         scrollDown();
     }
 
-    function addAgentRow(text) {
+    /**
+     * Fill in the translation for the pending row.
+     */
+    function fillTranslation(text) {
         hideEmpty();
 
         if (pendingRow) {
-            const cell = pendingRow.querySelector('.msg-cell.is-translation');
-            if (cell) {
-                cell.textContent = text;
-                cell.classList.remove('empty');
+            // Find the cell that's still marked 'empty'
+            const emptyCell = pendingRow.querySelector('.msg-cell.empty');
+            if (emptyCell) {
+                emptyCell.textContent = text;
+                emptyCell.classList.remove('empty');
             }
             pendingRow = null;
         } else {
-            // Standalone translation (no pending source)
+            // Standalone agent response (no pending user row)
             const row = document.createElement('div');
             row.className = 'msg-row';
 
-            const left = document.createElement('div');
-            left.className = 'msg-cell is-source col-from empty';
+            const isEn = isLikelyEnglish(text);
+            const enCell = document.createElement('div');
+            const otherCell = document.createElement('div');
 
-            const right = document.createElement('div');
-            right.className = 'msg-cell is-translation col-to';
-            right.textContent = text;
+            if (isEn) {
+                enCell.className = 'msg-cell col-from';
+                enCell.textContent = text;
+                otherCell.className = 'msg-cell col-to empty';
+            } else {
+                enCell.className = 'msg-cell col-from empty';
+                otherCell.className = 'msg-cell col-to';
+                otherCell.textContent = text;
+            }
 
-            row.appendChild(left);
-            row.appendChild(right);
+            row.appendChild(enCell);
+            row.appendChild(otherCell);
             $transcript.appendChild(row);
         }
         scrollDown();
     }
 
-    function updateLastAgent(text) {
+    function updateLastTranslation(text) {
         const rows = $transcript.querySelectorAll('.msg-row');
         if (rows.length) {
-            const cell = rows[rows.length - 1].querySelector('.msg-cell.is-translation');
-            if (cell) { cell.textContent = text; cell.classList.remove('empty'); }
+            const emptyCell = rows[rows.length - 1].querySelector('.msg-cell.empty');
+            if (emptyCell) {
+                emptyCell.textContent = text;
+                emptyCell.classList.remove('empty');
+            }
         }
     }
 

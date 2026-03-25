@@ -56,7 +56,7 @@ module.exports = async (req, res) => {
         return res.json({ agentId, signedUrl, from, to, languages: { a: langA, b: langB } });
     } catch (err) {
         console.error('Agent API error:', err);
-        delete agentCache[cacheKey]; // bust cache on failure
+        delete agentCache[cacheKey];
         return res.status(500).json({ error: err.message || 'Failed to create agent' });
     }
 };
@@ -69,14 +69,10 @@ function getCached(key) {
 }
 
 async function createAgent(apiKey, fromCode, toCode, langA, langB, voiceId) {
-    // Determine primary language: use the non-English language so the
-    // multilingual model (flash_v2_5) handles STT for both.
-    // ElevenLabs requires English agents to use v2 (English-only TTS).
-    // By making the non-English language primary, we unlock flash_v2_5
-    // which supports both languages. The language_detection built-in tool
-    // handles switching between the two automatically.
+    // Use non-English language as primary to unlock eleven_flash_v2_5
+    // (multilingual model). The language_detection tool handles switching
+    // between languages for proper bidirectional STT.
     const primaryLang = fromCode === 'en' ? toCode : fromCode;
-    const otherLang   = fromCode === 'en' ? fromCode : toCode;
 
     const systemPrompt = `You are a real-time translation machine. You translate between ${langA} and ${langB}. You are NOT an assistant. You do NOT converse.
 
@@ -97,13 +93,19 @@ SILENCE RULE: When there is no speech input, you MUST remain completely silent. 
                 prompt: {
                     prompt: systemPrompt,
                     temperature: 0.1,
+                    built_in_tools: {
+                        language_detection: {
+                            name: 'language_detection',
+                            params: {},
+                        },
+                    },
                 },
                 first_message: '',
                 language: primaryLang,
             },
             turn: {
                 mode: 'turn',
-                turn_timeout: 3,
+                turn_timeout: 5,
                 silence_end_call_timeout: 60,
             },
             tts: {
