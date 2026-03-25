@@ -99,7 +99,10 @@ SILENCE RULE: When there is no speech input, you MUST remain completely silent. 
                     temperature: 0.1,
                     max_tokens: 150,
                     built_in_tools: {
-                        language_detection: {},
+                        language_detection: {
+                            name: 'language_detection',
+                            params: {},
+                        },
                     },
                 },
                 first_message: '',
