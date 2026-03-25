@@ -98,9 +98,9 @@ SILENCE RULE: When there is no speech input, you MUST remain completely silent. 
                     prompt: systemPrompt,
                     temperature: 0.1,
                     max_tokens: 150,
-                    built_in_tools: [
-                        { name: 'language_detection', type: 'system' },
-                    ],
+                    built_in_tools: {
+                        language_detection: {},
+                    },
                 },
                 first_message: '',
                 language: primaryLang,
