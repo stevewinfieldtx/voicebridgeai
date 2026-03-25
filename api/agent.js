@@ -1,152 +1,109 @@
 /* =========================================
    TalkBridge — ElevenLabs Agent API
-   GET /api/agent?from=en&to=vi
-   Creates (or reuses) an ElevenLabs Conversational AI agent
-   configured as a strict translator, then returns a signed
-   WebSocket URL the client can connect to directly.
+   GET /api/agent?from=en&to=vi&gender=female
+   Creates (or reuses) an ElevenLabs Conversational AI
+   agent configured as a strict bidirectional translator,
+   then returns a signed WebSocket URL.
    ========================================= */
 
-// In-memory cache: "en|vi" → { agentId, createdAt }
 const agentCache = {};
-const CACHE_TTL = 30 * 60 * 1000; // 30 minutes — agents are config, not sessions
+const CACHE_TTL = 30 * 60 * 1000; // 30 min
 
-const LANGUAGE_NAMES = {
+const LANG = {
     en: 'English', vi: 'Vietnamese', es: 'Spanish', fr: 'French',
-    de: 'German', it: 'Italian', pt: 'Portuguese', nl: 'Dutch',
-    ru: 'Russian', uk: 'Ukrainian', ar: 'Arabic', hi: 'Hindi',
-    zh: 'Chinese', ja: 'Japanese', ko: 'Korean', th: 'Thai',
+    de: 'German',  it: 'Italian',    pt: 'Portuguese', nl: 'Dutch',
+    ru: 'Russian', uk: 'Ukrainian',  ar: 'Arabic',  hi: 'Hindi',
+    zh: 'Chinese', ja: 'Japanese',   ko: 'Korean',  th: 'Thai',
 };
 
-
+const VOICES = {
+    male:   'nPczCjzI2devNBz1zQrb', // Brian
+    female: 'EXAVITQu4vr4xnSDxMaL', // Aria
+};
 
 module.exports = async (req, res) => {
-    // CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     if (req.method === 'OPTIONS') return res.status(204).end();
 
     const API_KEY = process.env.ELEVENLABS_API_KEY;
-    if (!API_KEY) {
-        return res.status(500).json({ error: 'ELEVENLABS_API_KEY not configured' });
-    }
+    if (!API_KEY) return res.status(500).json({ error: 'ELEVENLABS_API_KEY not set' });
 
-    const from   = req.query.from   || 'en';
-    const to     = req.query.to     || 'vi';
+    const from   = req.query.from || 'en';
+    const to     = req.query.to   || 'vi';
     const gender = req.query.gender === 'male' ? 'male' : 'female';
 
-    // ElevenLabs multilingual voice IDs
-    const VOICE_ID = gender === 'male'
-        ? 'nPczCjzI2devNBz1zQrb'   // Brian — natural US male
-        : 'EXAVITQu4vr4xnSDxMaL';  // Aria  — natural US female
-
-    if (!LANGUAGE_NAMES[from] || !LANGUAGE_NAMES[to]) {
+    if (!LANG[from] || !LANG[to]) {
         return res.status(400).json({ error: 'Unsupported language code' });
+    }
+    if (from === to) {
+        return res.status(400).json({ error: 'Languages must differ' });
     }
 
     const cacheKey = `${from}|${to}|${gender}`;
-    const langA = LANGUAGE_NAMES[from];
-    const langB = LANGUAGE_NAMES[to];
+    const langA = LANG[from];
+    const langB = LANG[to];
 
     try {
-        // Step 1: Get or create agent
-        let agentId = getCachedAgent(cacheKey);
-
+        let agentId = getCached(cacheKey);
         if (!agentId) {
-            agentId = await createAgent(API_KEY, from, to, langA, langB, VOICE_ID);
-            agentCache[cacheKey] = { agentId, createdAt: Date.now() };
+            agentId = await createAgent(API_KEY, from, to, langA, langB, VOICES[gender]);
+            agentCache[cacheKey] = { agentId, ts: Date.now() };
         }
 
-        // Step 2: Get a signed WebSocket URL
         const signedUrl = await getSignedUrl(API_KEY, agentId);
-
-        return res.status(200).json({
-            agentId,
-            signedUrl,
-            from,
-            to,
-            languages: { a: langA, b: langB },
-        });
+        return res.json({ agentId, signedUrl, from, to, languages: { a: langA, b: langB } });
     } catch (err) {
         console.error('Agent API error:', err);
-        // If agent was cached but failed, clear cache and retry once
-        if (agentCache[cacheKey]) {
-            delete agentCache[cacheKey];
-        }
+        delete agentCache[cacheKey]; // bust cache on failure
         return res.status(500).json({ error: err.message || 'Failed to create agent' });
     }
 };
 
-function getCachedAgent(key) {
-    const cached = agentCache[key];
-    if (!cached) return null;
-    if (Date.now() - cached.createdAt > CACHE_TTL) {
-        delete agentCache[key];
-        return null;
-    }
-    return cached.agentId;
+function getCached(key) {
+    const c = agentCache[key];
+    if (!c) return null;
+    if (Date.now() - c.ts > CACHE_TTL) { delete agentCache[key]; return null; }
+    return c.agentId;
 }
 
 async function createAgent(apiKey, fromCode, toCode, langA, langB, voiceId) {
-    const systemPrompt = `ROLE: Translation Machine
-TYPE: Strict bidirectional voice translator
-PAIR: ${langA} ↔ ${langB}
-MODE: Translate only. Never converse.
+    // Determine primary language: use the non-English language so the
+    // multilingual model (flash_v2_5) handles STT for both.
+    // ElevenLabs requires English agents to use v2 (English-only TTS).
+    // By making the non-English language primary, we unlock flash_v2_5
+    // which supports both languages. The language_detection built-in tool
+    // handles switching between the two automatically.
+    const primaryLang = fromCode === 'en' ? toCode : fromCode;
+    const otherLang   = fromCode === 'en' ? fromCode : toCode;
 
-─── HARD RULES (violating any rule is a critical failure) ───
+    const systemPrompt = `You are a real-time translation machine. You translate between ${langA} and ${langB}. You are NOT an assistant. You do NOT converse.
 
-1. DETECT the input language, then OUTPUT the translation in the OTHER language.
-   • ${langA} input → ${langB} output.
-   • ${langB} input → ${langA} output.
+RULES:
+1. When you hear ${langA}, output ONLY the ${langB} translation.
+2. When you hear ${langB}, output ONLY the ${langA} translation.
+3. Output NOTHING except the translation. No greetings, no commentary, no "sure", no "here is the translation".
+4. NEVER repeat the input language. If input is ${langA}, output MUST be ${langB}. If input is ${langB}, output MUST be ${langA}.
+5. NEVER speak during silence. If nobody is talking, produce ZERO output. No "are you there?", no "hello?", no prompts of any kind. Absolute silence.
+6. Keep translations natural and conversational, not word-for-word.
 
-2. OUTPUT = translated sentence ONLY. Nothing before it, nothing after it.
-
-3. NEVER output in the SAME language as the input. If someone speaks ${langA}, your entire response must be in ${langB}. If someone speaks ${langB}, your entire response must be in ${langA}.
-
-4. NEVER repeat, echo, or parrot back the original words. Your output must be the translation, not a copy.
-
-5. Keep the original meaning, tone, and register. Translate naturally — not word-for-word.
-
-6. If you hear a greeting like "hello" in ${langA}, translate it to the equivalent greeting in ${langB}. Do NOT reply with a greeting in ${langA}. Do NOT add anything beyond the translation.
-
-─── FORBIDDEN (never do any of these) ───
-
-• Do NOT answer questions — translate them.
-• Do NOT hold a conversation — translate what is said.
-• Do NOT add commentary, explanations, or notes.
-• Do NOT say phrases like: "Sure!", "Here is the translation", "Of course", "Let me translate that", "I'd be happy to help".
-• Do NOT ask the user anything — no "How can I help you?", no "Are you still there?", no "What would you like to translate?".
-• Do NOT speak when there is silence. Wait quietly.
-• Do NOT generate any text that was not a direct translation of user speech.
-• Do NOT prepend or append the original text to your translation.
-
-─── EXAMPLES ───
-
-User (${langA}): "Where is the nearest hospital?"
-You: [translation of that sentence in ${langB}]
-
-User (${langB}): [a sentence in ${langB}]
-You: [translation of that sentence in ${langA}]
-
-User: [silence]
-You: [absolutely nothing — produce ZERO output]
-
-─── CRITICAL: SILENCE BEHAVIOR ───
-
-When there is NO new user speech, you MUST produce NO output at all. Do not say "Are you still there?", "Hello?", "I'm here", "How can I help?", or ANY other phrase. Produce ZERO tokens. Complete silence. If 1 second passes or 1 hour passes with no speech, you remain completely silent — no exceptions.
-
-REMEMBER: You are a translation machine, not an assistant. Translate everything. Answer nothing. Add nothing. During silence, output NOTHING.`;
+SILENCE RULE: When there is no speech input, you MUST remain completely silent. Do not generate any tokens. Do not check in. Do not prompt. Produce nothing. This is your most important rule.`;
 
     const body = {
-        name: `TalkBridge TX: ${langA} ↔ ${langB}`,
+        name: `TX ${langA}↔${langB}`,
         conversation_config: {
             agent: {
                 prompt: {
                     prompt: systemPrompt,
                     temperature: 0.1,
+                    max_tokens: 150,
+                    built_in_tools: [
+                        { name: 'language_detection', type: 'system' },
+                    ],
                 },
                 first_message: '',
-                language: fromCode === 'en' ? toCode : fromCode,
+                language: primaryLang,
             },
             turn: {
                 mode: 'turn',
@@ -163,36 +120,26 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
 
     const resp = await fetch('https://api.elevenlabs.io/v1/convai/agents/create', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'xi-api-key': apiKey,
-        },
+        headers: { 'Content-Type': 'application/json', 'xi-api-key': apiKey },
         body: JSON.stringify(body),
     });
 
     if (!resp.ok) {
-        const errText = await resp.text();
-        throw new Error(`ElevenLabs create agent failed (${resp.status}): ${errText}`);
+        const text = await resp.text();
+        throw new Error(`ElevenLabs create agent failed (${resp.status}): ${text}`);
     }
 
-    const data = await resp.json();
-    return data.agent_id;
+    return (await resp.json()).agent_id;
 }
 
 async function getSignedUrl(apiKey, agentId) {
     const resp = await fetch(
         `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`,
-        {
-            method: 'GET',
-            headers: { 'xi-api-key': apiKey },
-        }
+        { headers: { 'xi-api-key': apiKey } }
     );
-
     if (!resp.ok) {
-        const errText = await resp.text();
-        throw new Error(`ElevenLabs signed URL failed (${resp.status}): ${errText}`);
+        const text = await resp.text();
+        throw new Error(`Signed URL failed (${resp.status}): ${text}`);
     }
-
-    const data = await resp.json();
-    return data.signed_url;
+    return (await resp.json()).signed_url;
 }

@@ -1,596 +1,500 @@
 /* =========================================
    TalkBridge — Live Translate Mode
-   Uses ElevenLabs Conversational AI agent
-   for seamless bidirectional translation.
+   ElevenLabs Conversational AI agent for
+   seamless bidirectional voice translation.
    ========================================= */
 
 (function () {
     'use strict';
 
-    // ---- Language Catalog (same as main app) ----
+    // ---- Language Catalog ----
     const LANGS = [
-        { code: 'en',  name: 'English',    flag: '🇺🇸' },
-        { code: 'vi',  name: 'Tiếng Việt', flag: '🇻🇳' },
-        { code: 'es',  name: 'Español',    flag: '🇲🇽' },
-        { code: 'fr',  name: 'Français',   flag: '🇫🇷' },
-        { code: 'de',  name: 'Deutsch',    flag: '🇩🇪' },
-        { code: 'it',  name: 'Italiano',   flag: '🇮🇹' },
-        { code: 'pt',  name: 'Português (BR)', flag: '🇧🇷' },
-        { code: 'nl',  name: 'Nederlands', flag: '🇳🇱' },
-        { code: 'ru',  name: 'Русский',    flag: '🇷🇺' },
-        { code: 'uk',  name: 'Українська', flag: '🇺🇦' },
-        { code: 'ar',  name: 'العربية',    flag: '🇸🇦' },
-        { code: 'hi',  name: 'हिन्दी',     flag: '🇮🇳' },
-        { code: 'zh',  name: '中文',        flag: '🇨🇳' },
-        { code: 'ja',  name: '日本語',      flag: '🇯🇵' },
-        { code: 'ko',  name: '한국어',      flag: '🇰🇷' },
-        { code: 'th',  name: 'ภาษาไทย',    flag: '🇹🇭' },
+        { code: 'en', name: 'English',         flag: '\u{1F1FA}\u{1F1F8}' },
+        { code: 'vi', name: 'Ti\u1EBFng Vi\u1EC7t', flag: '\u{1F1FB}\u{1F1F3}' },
+        { code: 'es', name: 'Espa\u00F1ol',    flag: '\u{1F1F2}\u{1F1FD}' },
+        { code: 'fr', name: 'Fran\u00E7ais',   flag: '\u{1F1EB}\u{1F1F7}' },
+        { code: 'de', name: 'Deutsch',          flag: '\u{1F1E9}\u{1F1EA}' },
+        { code: 'it', name: 'Italiano',         flag: '\u{1F1EE}\u{1F1F9}' },
+        { code: 'pt', name: 'Portugu\u00EAs (BR)', flag: '\u{1F1E7}\u{1F1F7}' },
+        { code: 'nl', name: 'Nederlands',       flag: '\u{1F1F3}\u{1F1F1}' },
+        { code: 'ru', name: '\u0420\u0443\u0441\u0441\u043A\u0438\u0439', flag: '\u{1F1F7}\u{1F1FA}' },
+        { code: 'uk', name: '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430', flag: '\u{1F1FA}\u{1F1E6}' },
+        { code: 'ar', name: '\u0627\u0644\u0639\u0631\u0628\u064A\u0629', flag: '\u{1F1F8}\u{1F1E6}' },
+        { code: 'hi', name: '\u0939\u093F\u0928\u094D\u0926\u0940', flag: '\u{1F1EE}\u{1F1F3}' },
+        { code: 'zh', name: '\u4E2D\u6587',     flag: '\u{1F1E8}\u{1F1F3}' },
+        { code: 'ja', name: '\u65E5\u672C\u8A9E', flag: '\u{1F1EF}\u{1F1F5}' },
+        { code: 'ko', name: '\uD55C\uAD6D\uC5B4', flag: '\u{1F1F0}\u{1F1F7}' },
+        { code: 'th', name: '\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22', flag: '\u{1F1F9}\u{1F1ED}' },
     ];
 
-    // ---- DOM Elements ----
-    const langFromSelect = document.getElementById('lang-from');
-    const langToSelect   = document.getElementById('lang-to');
-    const startBtn       = document.getElementById('start-btn');
-    const statusDot      = document.getElementById('status-dot');
-    const statusText     = document.getElementById('status-text');
-    const transcript     = document.getElementById('transcript');
-    const backLink       = document.getElementById('back-link');
-    const genderFemale   = document.getElementById('gender-female');
-    const genderMale     = document.getElementById('gender-male');
-    const genderBtns     = [genderFemale, genderMale];
+    // ---- Idle chatter patterns to suppress ----
+    const IDLE_PATTERNS = [
+        /are you (still )?there/i,
+        /hello\??$/i,
+        /how can i help/i,
+        /what would you like/i,
+        /can i help/i,
+        /is there anything/i,
+        /i'?m (still )?here/i,
+        /waiting for/i,
+        /let me know/i,
+        /go ahead/i,
+        /ready when you are/i,
+        /still listening/i,
+    ];
+
+    // ---- DOM ----
+    const $fromSelect   = document.getElementById('lang-from');
+    const $toSelect     = document.getElementById('lang-to');
+    const $startBtn     = document.getElementById('start-btn');
+    const $statusDot    = document.getElementById('status-dot');
+    const $statusText   = document.getElementById('status-text');
+    const $transcript   = document.getElementById('transcript');
+    const $genderFemale = document.getElementById('gender-female');
+    const $genderMale   = document.getElementById('gender-male');
+    const $genderBtns   = [$genderFemale, $genderMale];
 
     // ---- State ----
     let ws = null;
     let mediaStream = null;
-    let audioContext = null;   // for mic capture
-    let playbackCtx = null;    // for playing agent audio
-    let sourceNode = null;
-    let processorNode = null;
-    let isActive = false;
-    let isAgentSpeaking = false;
-    let selectedGender = localStorage.getItem('vb-gender') || 'female';
+    let micCtx = null;          // AudioContext for mic capture
+    let playCtx = null;         // AudioContext for playback
+    let srcNode = null;
+    let procNode = null;
+    let active = false;
+    let agentSpeaking = false;
+    let gender = localStorage.getItem('vb-gender') || 'female';
 
-    // Audio scheduling state
-    let nextPlayTime = 0;          // AudioContext.currentTime of next chunk
-    let scheduledSources = [];     // active AudioBufferSourceNodes
-    const AGENT_SAMPLE_RATE = 16000;  // ElevenLabs output PCM sample rate
+    // Audio scheduling
+    let nextPlayTime = 0;
+    let scheduled = [];          // active AudioBufferSourceNodes
+    const PCM_RATE = 16000;
 
-    // Reconnection state
-    let reconnectAttempts = 0;
+    // Reconnection
+    let reconnects = 0;
     const MAX_RECONNECTS = 5;
     let reconnectTimer = null;
-    let lastPongTime = 0;
-    let watchdogInterval = null;
-    let currentFrom = '';
-    let currentTo = '';
-    let lastUserSpeechTime = 0;           // tracks when user last spoke
-    const IDLE_SUPPRESS_MS = 8000;        // suppress agent if no user speech for 8s
-    let pendingRow = null;                // current msg-row awaiting translation
+    let lastPong = 0;
+    let watchdog = null;
 
-    // ---- Populate Language Selects ----
-    LANGS.forEach(lang => {
-        langFromSelect.add(new Option(`${lang.flag} ${lang.name}`, lang.code));
-        langToSelect.add(new Option(`${lang.flag} ${lang.name}`, lang.code));
+    // Session params
+    let curFrom = '';
+    let curTo = '';
+
+    // Idle suppression
+    let lastSpeechAt = 0;
+    const IDLE_MS = 5000;       // suppress agent if no user speech for 5s
+
+    // Transcript pairing
+    let pendingRow = null;
+
+    // ---- Init UI ----
+    LANGS.forEach(l => {
+        $fromSelect.add(new Option(`${l.flag} ${l.name}`, l.code));
+        $toSelect.add(new Option(`${l.flag} ${l.name}`, l.code));
     });
+    $fromSelect.value = localStorage.getItem('vb-live-from') || 'en';
+    $toSelect.value   = localStorage.getItem('vb-live-to')   || 'vi';
 
-    // Load saved preferences
-    langFromSelect.value = localStorage.getItem('vb-live-from') || 'en';
-    langToSelect.value   = localStorage.getItem('vb-live-to') || 'vi';
+    $genderBtns.forEach(b => b.classList.toggle('active', b.dataset.gender === gender));
+    $genderBtns.forEach(b => b.addEventListener('click', () => {
+        gender = b.dataset.gender;
+        localStorage.setItem('vb-gender', gender);
+        $genderBtns.forEach(x => x.classList.toggle('active', x === b));
+    }));
 
-    // Apply saved gender
-    genderBtns.forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.gender === selectedGender);
-    });
+    $fromSelect.addEventListener('change', () => localStorage.setItem('vb-live-from', $fromSelect.value));
+    $toSelect.addEventListener('change',   () => localStorage.setItem('vb-live-to',   $toSelect.value));
+    $startBtn.addEventListener('click',     () => active ? stop() : start());
 
-    // Gender toggle logic
-    genderBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            selectedGender = btn.dataset.gender;
-            localStorage.setItem('vb-gender', selectedGender);
-            genderBtns.forEach(b => b.classList.toggle('active', b === btn));
-        });
-    });
+    // =========================================================
+    //  START SESSION
+    // =========================================================
+    async function start() {
+        const from = $fromSelect.value;
+        const to   = $toSelect.value;
+        if (from === to) { log('Please select two different languages.', 'system'); return; }
 
-    // ---- Button Click ----
-    startBtn.addEventListener('click', () => {
-        if (isActive) {
-            stopSession();
-        } else {
-            startSession();
-        }
-    });
+        curFrom = from;
+        curTo   = to;
+        reconnects = 0;
+        lastSpeechAt = 0;
+        pendingRow = null;
 
-    // Save language selection
-    langFromSelect.addEventListener('change', () => {
-        localStorage.setItem('vb-live-from', langFromSelect.value);
-    });
-    langToSelect.addEventListener('change', () => {
-        localStorage.setItem('vb-live-to', langToSelect.value);
-    });
-
-    // ---- Start Session ----
-    async function startSession() {
-        const from = langFromSelect.value;
-        const to = langToSelect.value;
-
-        if (from === to) {
-            addTranscriptLine('⚠️ Please select two different languages.', 'system');
-            return;
-        }
-
-        currentFrom = from;
-        currentTo = to;
-        reconnectAttempts = 0;
-
-        setStatus('connecting', 'Connecting…');
-        startBtn.disabled = true;
-        langFromSelect.disabled = true;
-        langToSelect.disabled = true;
-        genderBtns.forEach(b => b.disabled = true);
+        setStatus('connecting', 'Connecting\u2026');
+        lockUI(true);
 
         try {
-            // Step 1: Get microphone access (keep alive across reconnects)
             if (!mediaStream) {
                 mediaStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        sampleRate: 16000,
-                        channelCount: 1,
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true,
-                    },
+                    audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
                 });
             }
-
-            // Step 2: Create playback audio context
-            if (!playbackCtx) {
-                playbackCtx = new (window.AudioContext || window.webkitAudioContext)({
-                    sampleRate: AGENT_SAMPLE_RATE,
-                });
+            if (!playCtx) {
+                playCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: PCM_RATE });
             }
             nextPlayTime = 0;
-
-            // Step 3: Connect WebSocket (gets fresh signed URL)
-            await connectWebSocket();
-
+            await connect();
         } catch (err) {
             console.error('Start error:', err);
-            addTranscriptLine(`❌ ${err.message}`, 'error');
+            log(`Error: ${err.message}`, 'error');
             setStatus('error', 'Failed');
-            resetControls();
+            lockUI(false);
         }
     }
 
-    // ---- Fetch fresh signed URL from our server ----
-    async function fetchSignedUrl() {
-        const resp = await fetch(
-            `/api/agent?from=${currentFrom}&to=${currentTo}&gender=${selectedGender}`
-        );
-        if (!resp.ok) {
-            const err = await resp.json();
-            throw new Error(err.error || 'Server error');
-        }
-        const data = await resp.json();
-        return data;
-    }
+    // =========================================================
+    //  CONNECT WEBSOCKET
+    // =========================================================
+    async function connect() {
+        const { signedUrl, languages } = await fetchAgent();
 
-    // ---- WebSocket Connection (with auto-reconnect) ----
-    async function connectWebSocket() {
-        // Always fetch a fresh signed URL for each connection
-        const { signedUrl, languages } = await fetchSignedUrl();
-        if (reconnectAttempts === 0) {
-            // Update column headers with language names
-            const colFrom = document.getElementById('col-header-from');
-            const colTo = document.getElementById('col-header-to');
-            if (colFrom) colFrom.textContent = `🗣️ ${languages.a}`;
-            if (colTo) colTo.textContent = `🌐 ${languages.b}`;
-            addTranscriptLine(`🔗 Agent ready: ${languages.a} ↔ ${languages.b}`, 'system');
+        if (reconnects === 0) {
+            setColumnHeaders(languages.a, languages.b);
+            log(`Agent ready: ${languages.a} \u2194 ${languages.b}`, 'system');
         } else {
-            addTranscriptLine(`🔄 Reconnected (attempt ${reconnectAttempts})`, 'system');
+            log(`Reconnected (attempt ${reconnects})`, 'system');
         }
 
-        // Close any existing WebSocket cleanly
-        if (ws) {
-            try { ws.close(); } catch (_) { /* ignore */ }
-            ws = null;
-        }
+        if (ws) { try { ws.close(); } catch (_) {} ws = null; }
 
         ws = new WebSocket(signedUrl);
-        lastPongTime = Date.now();
+        lastPong = Date.now();
 
         ws.onopen = () => {
-            setStatus('active', 'Listening…');
-            isActive = true;
-            reconnectAttempts = 0; // reset on successful connection
-            startBtn.disabled = false;
-            startBtn.querySelector('.btn-label').textContent = 'Stop';
-            startBtn.classList.add('active');
-
-            // Start mic capture if not already running
-            if (!processorNode) {
-                startAudioCapture();
-            }
-
-            // Start watchdog
+            active = true;
+            reconnects = 0;
+            setStatus('active', 'Listening\u2026');
+            lockUI(true);   // keep locked but enable stop btn
+            $startBtn.disabled = false;
+            $startBtn.querySelector('.btn-label').textContent = 'Stop';
+            $startBtn.classList.add('active');
+            if (!procNode) startMicCapture();
             startWatchdog();
         };
 
-        ws.onmessage = (event) => {
-            try {
-                const msg = JSON.parse(event.data);
-                handleAgentMessage(msg);
-            } catch (e) {
-                // Binary audio data or unparseable
-                console.warn('WS message parse error:', e);
-            }
+        ws.onmessage = (e) => {
+            try { handleMsg(JSON.parse(e.data)); }
+            catch (err) { console.warn('WS parse error:', err); }
         };
 
-        ws.onerror = (err) => {
-            console.error('WS error:', err);
-        };
+        ws.onerror = (err) => console.error('WS error:', err);
 
-        ws.onclose = (event) => {
-            console.log('WS closed:', event.code, event.reason);
+        ws.onclose = () => {
             stopWatchdog();
-
-            if (isActive) {
-                // Unexpected close — try to reconnect
-                attemptReconnect();
-            }
+            if (active) tryReconnect();
         };
     }
 
-    // ---- Auto-Reconnect with Backoff ----
-    function attemptReconnect() {
-        if (!isActive) return;
-        if (reconnectAttempts >= MAX_RECONNECTS) {
-            addTranscriptLine('❌ Lost connection after multiple retries. Please restart.', 'error');
-            stopSession();
-            return;
-        }
-
-        reconnectAttempts++;
-        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 8000); // 1s, 2s, 4s, 8s...
-        setStatus('connecting', `Reconnecting in ${delay / 1000}s…`);
-        addTranscriptLine(`⚡ Connection lost. Reconnecting… (${reconnectAttempts}/${MAX_RECONNECTS})`, 'system');
-
-        // Stop any current audio but keep mic alive
-        stopCurrentAudio();
-
-        reconnectTimer = setTimeout(async () => {
-            if (!isActive) return;
-            try {
-                await connectWebSocket();
-            } catch (err) {
-                console.error('Reconnect error:', err);
-                attemptReconnect(); // try again
-            }
-        }, delay);
+    async function fetchAgent() {
+        const r = await fetch(`/api/agent?from=${curFrom}&to=${curTo}&gender=${gender}`);
+        if (!r.ok) { const e = await r.json(); throw new Error(e.error || 'Server error'); }
+        return r.json();
     }
 
-    // ---- Connection Watchdog ----
-    function startWatchdog() {
-        stopWatchdog();
-        watchdogInterval = setInterval(() => {
-            if (!isActive || !ws) return;
-
-            // If we haven't received a pong in 30 seconds, connection is dead
-            if (Date.now() - lastPongTime > 30000) {
-                console.warn('Watchdog: no pong in 30s, forcing reconnect');
-                if (ws) {
-                    try { ws.close(); } catch (_) { /* triggers onclose → reconnect */ }
-                }
-            }
-        }, 15000); // check every 15 seconds
-    }
-
-    function stopWatchdog() {
-        if (watchdogInterval) {
-            clearInterval(watchdogInterval);
-            watchdogInterval = null;
-        }
-    }
-
-    // ---- Handle Messages from ElevenLabs Agent ----
-    function handleAgentMessage(msg) {
+    // =========================================================
+    //  HANDLE AGENT MESSAGES
+    // =========================================================
+    function handleMsg(msg) {
         switch (msg.type) {
             case 'conversation_initiation_metadata':
-                console.log('Agent initialized:', msg);
+                console.log('Agent session started');
                 break;
 
-            case 'user_transcript':
-                // What the user said (recognized speech)
-                if (msg.user_transcript_event?.user_transcript) {
-                    lastUserSpeechTime = Date.now();
-                    addTranscriptLine(msg.user_transcript_event.user_transcript, 'user');
+            case 'user_transcript': {
+                const text = msg.user_transcript_event?.user_transcript;
+                if (text) {
+                    lastSpeechAt = Date.now();
+                    addUserRow(text);
                 }
                 break;
+            }
 
-            case 'agent_response':
-                // Suppress idle chatter (e.g. "Are you there?")
-                if (Date.now() - lastUserSpeechTime > IDLE_SUPPRESS_MS) {
-                    console.log('Suppressed idle agent response:', msg.agent_response_event?.agent_response);
+            case 'agent_response': {
+                const text = msg.agent_response_event?.agent_response;
+                if (!text) break;
+
+                // Suppress if idle (no recent user speech)
+                if (lastSpeechAt === 0 || Date.now() - lastSpeechAt > IDLE_MS) {
+                    console.log('[suppress-idle]', text);
                     break;
                 }
-                // The agent's text response (translation)
-                if (msg.agent_response_event?.agent_response) {
-                    addTranscriptLine(msg.agent_response_event.agent_response, 'agent');
-                }
-                break;
-
-            case 'audio':
-                // Suppress audio when no recent user speech
-                if (Date.now() - lastUserSpeechTime > IDLE_SUPPRESS_MS) {
+                // Suppress if it matches known idle chatter patterns
+                if (IDLE_PATTERNS.some(rx => rx.test(text))) {
+                    console.log('[suppress-pattern]', text);
                     break;
                 }
-                // Audio chunk from agent — decode PCM and play
+
+                addAgentRow(text);
+                break;
+            }
+
+            case 'audio': {
+                // Suppress audio for idle chatter
+                if (lastSpeechAt === 0 || Date.now() - lastSpeechAt > IDLE_MS) break;
                 if (msg.audio_event?.audio_base_64) {
-                    playPcmChunk(msg.audio_event.audio_base_64);
+                    playChunk(msg.audio_event.audio_base_64);
                 }
                 break;
+            }
 
             case 'interruption':
-                // User interrupted the agent
-                stopCurrentAudio();
+                flushAudio();
                 break;
 
             case 'ping':
-                // Respond to keep-alive and track liveness
-                lastPongTime = Date.now();
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({
-                        type: 'pong',
-                        event_id: msg.ping_event?.event_id,
-                    }));
+                lastPong = Date.now();
+                if (ws?.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'pong', event_id: msg.ping_event?.event_id }));
                 }
                 break;
 
-            case 'agent_response_correction':
-                // Updated transcript
-                if (msg.agent_response_correction_event?.corrected_text) {
-                    updateLastAgentLine(msg.agent_response_correction_event.corrected_text);
-                }
+            case 'agent_response_correction': {
+                const text = msg.agent_response_correction_event?.corrected_text;
+                if (text) updateLastAgent(text);
                 break;
+            }
 
             default:
-                console.log('Agent msg:', msg.type, msg);
+                console.log('Agent:', msg.type);
         }
     }
 
-    // ---- Audio Capture (Mic → WebSocket) ----
-    function startAudioCapture() {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-        sourceNode = audioContext.createMediaStreamSource(mediaStream);
+    // =========================================================
+    //  MIC CAPTURE → WEBSOCKET
+    // =========================================================
+    function startMicCapture() {
+        micCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        srcNode = micCtx.createMediaStreamSource(mediaStream);
 
-        // Use ScriptProcessorNode for broad compatibility
-        const bufferSize = 4096;
-        processorNode = audioContext.createScriptProcessor(bufferSize, 1, 1);
+        const bufSize = 4096;
+        procNode = micCtx.createScriptProcessor(bufSize, 1, 1);
 
-        processorNode.onaudioprocess = (e) => {
-            if (!isActive || !ws || ws.readyState !== WebSocket.OPEN) return;
+        procNode.onaudioprocess = (e) => {
+            if (!active || !ws || ws.readyState !== WebSocket.OPEN) return;
 
-            const inputData = e.inputBuffer.getChannelData(0);
-
-            // Convert Float32 to Int16 PCM
-            const pcm16 = new Int16Array(inputData.length);
-            for (let i = 0; i < inputData.length; i++) {
-                const s = Math.max(-1, Math.min(1, inputData[i]));
-                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            const raw = e.inputBuffer.getChannelData(0);
+            const pcm = new Int16Array(raw.length);
+            for (let i = 0; i < raw.length; i++) {
+                const s = Math.max(-1, Math.min(1, raw[i]));
+                pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
             }
 
-            // Convert to base64
-            const bytes = new Uint8Array(pcm16.buffer);
-            let binary = '';
-            for (let i = 0; i < bytes.byteLength; i++) {
-                binary += String.fromCharCode(bytes[i]);
-            }
-            const base64 = btoa(binary);
+            // base64 encode
+            const bytes = new Uint8Array(pcm.buffer);
+            let bin = '';
+            for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
 
-            // Send to ElevenLabs
-            ws.send(JSON.stringify({
-                user_audio_chunk: base64,
-            }));
+            ws.send(JSON.stringify({ user_audio_chunk: btoa(bin) }));
         };
 
-        sourceNode.connect(processorNode);
-        processorNode.connect(audioContext.destination);
+        srcNode.connect(procNode);
+        procNode.connect(micCtx.destination);
     }
 
-    // ---- Audio Playback via AudioContext (PCM → Speaker) ----
-    // ElevenLabs sends base64-encoded 16-bit signed PCM at 16kHz.
-    // We decode each chunk, convert Int16→Float32, create an
-    // AudioBuffer, and schedule it for gapless playback.
+    // =========================================================
+    //  AUDIO PLAYBACK (PCM 16kHz → Speaker)
+    // =========================================================
+    function playChunk(b64) {
+        if (!playCtx) return;
 
-    function playPcmChunk(base64Audio) {
-        if (!playbackCtx) return;
-
-        // Update status
-        if (!isAgentSpeaking) {
-            isAgentSpeaking = true;
-            setStatus('speaking', 'Translating…');
+        if (!agentSpeaking) {
+            agentSpeaking = true;
+            setStatus('speaking', 'Translating\u2026');
         }
 
-        // Decode base64 → Uint8Array → Int16Array
-        const binaryString = atob(base64Audio);
-        const rawBytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-            rawBytes[i] = binaryString.charCodeAt(i);
-        }
-        const int16 = new Int16Array(rawBytes.buffer);
+        const bin = atob(b64);
+        const raw = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
+        const int16 = new Int16Array(raw.buffer);
 
-        // Convert Int16 → Float32 (range -1.0 to 1.0)
-        const float32 = new Float32Array(int16.length);
-        for (let i = 0; i < int16.length; i++) {
-            float32[i] = int16[i] / 32768;
-        }
+        const f32 = new Float32Array(int16.length);
+        for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768;
 
-        // Create AudioBuffer
-        const audioBuffer = playbackCtx.createBuffer(1, float32.length, AGENT_SAMPLE_RATE);
-        audioBuffer.getChannelData(0).set(float32);
+        const buf = playCtx.createBuffer(1, f32.length, PCM_RATE);
+        buf.getChannelData(0).set(f32);
 
-        // Schedule for gapless playback
-        const source = playbackCtx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(playbackCtx.destination);
+        const src = playCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(playCtx.destination);
 
-        const now = playbackCtx.currentTime;
-        const startTime = Math.max(now, nextPlayTime);
-        source.start(startTime);
-        nextPlayTime = startTime + audioBuffer.duration;
+        const now = playCtx.currentTime;
+        const t = Math.max(now, nextPlayTime);
+        src.start(t);
+        nextPlayTime = t + buf.duration;
 
-        // Track this source so we can stop it on interruption
-        scheduledSources.push(source);
-        source.onended = () => {
-            scheduledSources = scheduledSources.filter(s => s !== source);
-            // If no more sources are queued, agent is done speaking
-            if (scheduledSources.length === 0) {
-                isAgentSpeaking = false;
-                setStatus('active', 'Listening…');
+        scheduled.push(src);
+        src.onended = () => {
+            scheduled = scheduled.filter(s => s !== src);
+            if (scheduled.length === 0) {
+                agentSpeaking = false;
+                setStatus('active', 'Listening\u2026');
             }
         };
     }
 
-    function stopCurrentAudio() {
-        // Stop all scheduled audio sources
-        scheduledSources.forEach(s => {
-            try { s.stop(); } catch (_) { /* already stopped */ }
-        });
-        scheduledSources = [];
+    function flushAudio() {
+        scheduled.forEach(s => { try { s.stop(); } catch (_) {} });
+        scheduled = [];
         nextPlayTime = 0;
-        isAgentSpeaking = false;
+        agentSpeaking = false;
     }
 
-    // ---- Stop Session (user-initiated) ----
-    function stopSession() {
-        isActive = false;
-
-        // Cancel any pending reconnect
-        if (reconnectTimer) {
-            clearTimeout(reconnectTimer);
-            reconnectTimer = null;
+    // =========================================================
+    //  RECONNECT + WATCHDOG
+    // =========================================================
+    function tryReconnect() {
+        if (!active) return;
+        if (reconnects >= MAX_RECONNECTS) {
+            log('Lost connection. Please restart.', 'error');
+            stop();
+            return;
         }
+        reconnects++;
+        const delay = Math.min(1000 * 2 ** (reconnects - 1), 8000);
+        setStatus('connecting', `Reconnecting in ${delay / 1000}s\u2026`);
+        log(`Connection lost. Retrying\u2026 (${reconnects}/${MAX_RECONNECTS})`, 'system');
+        flushAudio();
+        reconnectTimer = setTimeout(async () => {
+            if (!active) return;
+            try { await connect(); }
+            catch (_) { tryReconnect(); }
+        }, delay);
+    }
+
+    function startWatchdog() {
         stopWatchdog();
+        watchdog = setInterval(() => {
+            if (!active || !ws) return;
+            if (Date.now() - lastPong > 30000) {
+                console.warn('Watchdog: no pong in 30s');
+                try { ws.close(); } catch (_) {}
+            }
+        }, 15000);
+    }
+    function stopWatchdog() { if (watchdog) { clearInterval(watchdog); watchdog = null; } }
 
-        // Close WebSocket
-        if (ws) {
-            ws.close();
-            ws = null;
-        }
-
-        // Stop mic capture
-        if (processorNode) {
-            processorNode.disconnect();
-            processorNode = null;
-        }
-        if (sourceNode) {
-            sourceNode.disconnect();
-            sourceNode = null;
-        }
-        if (audioContext) {
-            audioContext.close();
-            audioContext = null;
-        }
-        if (mediaStream) {
-            mediaStream.getTracks().forEach(t => t.stop());
-            mediaStream = null;
-        }
-
-        // Stop playback
-        stopCurrentAudio();
-        if (playbackCtx) {
-            playbackCtx.close();
-            playbackCtx = null;
-        }
-
-        reconnectAttempts = 0;
-        resetControls();
+    // =========================================================
+    //  STOP SESSION
+    // =========================================================
+    function stop() {
+        active = false;
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        stopWatchdog();
+        if (ws) { ws.close(); ws = null; }
+        if (procNode)    { procNode.disconnect(); procNode = null; }
+        if (srcNode)     { srcNode.disconnect();  srcNode = null; }
+        if (micCtx)      { micCtx.close();  micCtx = null; }
+        if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+        flushAudio();
+        if (playCtx) { playCtx.close(); playCtx = null; }
+        reconnects = 0;
+        lockUI(false);
         setStatus('idle', 'Ready');
-        addTranscriptLine('⏹ Session ended', 'system');
+        log('Session ended', 'system');
     }
 
-    // ---- UI Helpers ----
-    function resetControls() {
-        startBtn.disabled = false;
-        startBtn.querySelector('.btn-label').textContent = 'Start';
-        startBtn.classList.remove('active');
-        langFromSelect.disabled = false;
-        langToSelect.disabled = false;
-        genderBtns.forEach(b => b.disabled = false);
+    // =========================================================
+    //  TRANSCRIPT UI — Two-column layout
+    // =========================================================
+    function setColumnHeaders(langA, langB) {
+        const hFrom = document.getElementById('col-header-from');
+        const hTo   = document.getElementById('col-header-to');
+        if (hFrom) hFrom.textContent = `\uD83D\uDDE3\uFE0F ${langA}`;
+        if (hTo)   hTo.textContent   = `\uD83C\uDF10 ${langB}`;
     }
 
-    function setStatus(state, text) {
-        statusDot.className = 'status-dot ' + state;
-        statusText.textContent = text;
+    function addUserRow(text) {
+        hideEmpty();
+
+        const row = document.createElement('div');
+        row.className = 'msg-row';
+
+        const left = document.createElement('div');
+        left.className = 'msg-cell is-source col-from';
+        left.textContent = text;
+
+        const right = document.createElement('div');
+        right.className = 'msg-cell is-translation col-to empty';
+        right.textContent = '\u2026';
+
+        row.appendChild(left);
+        row.appendChild(right);
+        $transcript.appendChild(row);
+        pendingRow = row;
+        scrollDown();
     }
 
-    function addTranscriptLine(text, type) {
-        const empty = document.getElementById('transcript-empty');
-        if (empty) empty.style.display = 'none';
+    function addAgentRow(text) {
+        hideEmpty();
 
-        // Show column headers on first real message
-        const colHeaders = document.getElementById('col-headers');
-        if (colHeaders) colHeaders.style.display = '';
-
-        if (type === 'user') {
-            // Create a new two-column row: source on left, translation pending on right
+        if (pendingRow) {
+            const cell = pendingRow.querySelector('.msg-cell.is-translation');
+            if (cell) {
+                cell.textContent = text;
+                cell.classList.remove('empty');
+            }
+            pendingRow = null;
+        } else {
+            // Standalone translation (no pending source)
             const row = document.createElement('div');
             row.className = 'msg-row';
 
-            const sourceCell = document.createElement('div');
-            sourceCell.className = 'msg-cell is-source col-from';
-            sourceCell.textContent = text;
+            const left = document.createElement('div');
+            left.className = 'msg-cell is-source col-from empty';
 
-            const transCell = document.createElement('div');
-            transCell.className = 'msg-cell is-translation col-to empty';
-            transCell.textContent = '…';
+            const right = document.createElement('div');
+            right.className = 'msg-cell is-translation col-to';
+            right.textContent = text;
 
-            row.appendChild(sourceCell);
-            row.appendChild(transCell);
-            transcript.appendChild(row);
-            pendingRow = row;
-        } else if (type === 'agent') {
-            // Fill the translation cell in the pending row
-            if (pendingRow) {
-                const transCell = pendingRow.querySelector('.msg-cell.is-translation');
-                if (transCell) {
-                    transCell.textContent = text;
-                    transCell.classList.remove('empty');
-                }
-                pendingRow = null;
-            } else {
-                // No pending row — create a standalone row with translation on right
-                const row = document.createElement('div');
-                row.className = 'msg-row';
-                const emptyCell = document.createElement('div');
-                emptyCell.className = 'msg-cell is-source col-from empty';
-                emptyCell.textContent = '';
-                const transCell = document.createElement('div');
-                transCell.className = 'msg-cell is-translation col-to';
-                transCell.textContent = text;
-                row.appendChild(emptyCell);
-                row.appendChild(transCell);
-                transcript.appendChild(row);
-            }
-        } else {
-            // System / error — full-width line
-            const div = document.createElement('div');
-            div.className = `transcript-line ${type}`;
-            div.textContent = text;
-            transcript.appendChild(div);
+            row.appendChild(left);
+            row.appendChild(right);
+            $transcript.appendChild(row);
         }
-        transcript.scrollTop = transcript.scrollHeight;
+        scrollDown();
     }
 
-    function updateLastAgentLine(text) {
-        const rows = transcript.querySelectorAll('.msg-row');
-        if (rows.length > 0) {
-            const lastRow = rows[rows.length - 1];
-            const transCell = lastRow.querySelector('.msg-cell.is-translation');
-            if (transCell) {
-                transCell.textContent = text;
-                transCell.classList.remove('empty');
-            }
+    function updateLastAgent(text) {
+        const rows = $transcript.querySelectorAll('.msg-row');
+        if (rows.length) {
+            const cell = rows[rows.length - 1].querySelector('.msg-cell.is-translation');
+            if (cell) { cell.textContent = text; cell.classList.remove('empty'); }
         }
+    }
+
+    function log(text, type) {
+        hideEmpty();
+        const div = document.createElement('div');
+        div.className = `transcript-line ${type}`;
+        div.textContent = type === 'system' ? `\u2014 ${text}` : text;
+        $transcript.appendChild(div);
+        scrollDown();
+    }
+
+    function hideEmpty() {
+        const el = document.getElementById('transcript-empty');
+        if (el) el.style.display = 'none';
+        const hdr = document.getElementById('col-headers');
+        if (hdr) hdr.style.display = '';
+    }
+
+    function scrollDown() { $transcript.scrollTop = $transcript.scrollHeight; }
+
+    // =========================================================
+    //  UI HELPERS
+    // =========================================================
+    function setStatus(state, text) {
+        $statusDot.className = 'status-dot ' + state;
+        $statusText.textContent = text;
+    }
+
+    function lockUI(locked) {
+        $startBtn.disabled = false;
+        $startBtn.querySelector('.btn-label').textContent = locked ? 'Stop' : 'Start Live Session';
+        $startBtn.classList.toggle('active', locked);
+        $fromSelect.disabled = locked;
+        $toSelect.disabled   = locked;
+        $genderBtns.forEach(b => b.disabled = locked);
     }
 
 })();
