@@ -195,16 +195,21 @@
     // =========================================================
     //  HANDLE AGENT MESSAGES
     // =========================================================
+    // Track whether the current agent response should be suppressed
+    let suppressCurrent = false;
+
     function handleMsg(msg) {
         switch (msg.type) {
             case 'conversation_initiation_metadata':
-                console.log('Agent session started');
+                console.log('[ws] session started', msg);
                 break;
 
             case 'user_transcript': {
                 const text = msg.user_transcript_event?.user_transcript;
+                console.log('[ws] user_transcript:', text);
                 if (text) {
                     lastSpeechAt = Date.now();
+                    suppressCurrent = false;
                     addUserRow(text);
                 }
                 break;
@@ -212,26 +217,24 @@
 
             case 'agent_response': {
                 const text = msg.agent_response_event?.agent_response;
+                console.log('[ws] agent_response:', text);
                 if (!text) break;
 
-                // Suppress if idle (no recent user speech)
-                if (lastSpeechAt === 0 || Date.now() - lastSpeechAt > IDLE_MS) {
-                    console.log('[suppress-idle]', text);
-                    break;
-                }
-                // Suppress if it matches known idle chatter patterns
+                // Only suppress if it matches known idle chatter patterns
                 if (IDLE_PATTERNS.some(rx => rx.test(text))) {
                     console.log('[suppress-pattern]', text);
+                    suppressCurrent = true;
                     break;
                 }
 
+                suppressCurrent = false;
                 addAgentRow(text);
                 break;
             }
 
             case 'audio': {
-                // Suppress audio for idle chatter
-                if (lastSpeechAt === 0 || Date.now() - lastSpeechAt > IDLE_MS) break;
+                // Only suppress audio if the current agent response was suppressed
+                if (suppressCurrent) break;
                 if (msg.audio_event?.audio_base_64) {
                     playChunk(msg.audio_event.audio_base_64);
                 }
@@ -240,6 +243,7 @@
 
             case 'interruption':
                 flushAudio();
+                suppressCurrent = false;
                 break;
 
             case 'ping':
