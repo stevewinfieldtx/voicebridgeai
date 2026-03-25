@@ -27,29 +27,6 @@
         { code: 'th', name: '\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22', flag: '\u{1F1F9}\u{1F1ED}' },
     ];
 
-    // ---- Idle chatter patterns to suppress ----
-    const IDLE_PATTERNS = [
-        /are you (still )?there/i,
-        /hello\??$/i,
-        /^hi\!?$/i,
-        /how can i help/i,
-        /what would you like/i,
-        /can i help/i,
-        /is there anything/i,
-        /i'?m (still )?here/i,
-        /waiting for/i,
-        /let me know/i,
-        /go ahead/i,
-        /ready when you are/i,
-        /still listening/i,
-        /do you need/i,
-        /what can i/i,
-        /how may i/i,
-    ];
-
-    // Minimum response length — suppress very short utterances (stutters/breaths)
-    const MIN_RESPONSE_LEN = 2;
-
     // ---- DOM ----
     const $fromSelect   = document.getElementById('lang-from');
     const $toSelect     = document.getElementById('lang-to');
@@ -88,9 +65,7 @@
     let curFrom = '';
     let curTo = '';
 
-    // Idle suppression
-    let lastSpeechAt = 0;
-    let suppressCurrent = false;
+    // (no idle suppression — matching original working code)
 
     // Transcript pairing
     let pendingRow = null;
@@ -213,34 +188,17 @@
 
             case 'user_transcript': {
                 const text = msg.user_transcript_event?.user_transcript;
-                console.log('[ws] user_transcript:', text);
-                if (text && text.trim().length >= MIN_RESPONSE_LEN) {
-                    lastSpeechAt = Date.now();
-                    suppressCurrent = false;
-                    addOriginalRow(text);
-                }
+                if (text) addOriginalRow(text);
                 break;
             }
 
             case 'agent_response': {
                 const text = msg.agent_response_event?.agent_response;
-                console.log('[ws] agent_response:', text);
-                if (!text || text.trim().length < MIN_RESPONSE_LEN) break;
-
-                // Suppress idle chatter patterns
-                if (IDLE_PATTERNS.some(rx => rx.test(text.trim()))) {
-                    console.log('[suppress-pattern]', text);
-                    suppressCurrent = true;
-                    break;
-                }
-
-                suppressCurrent = false;
-                fillTranslation(text);
+                if (text) fillTranslation(text);
                 break;
             }
 
             case 'audio': {
-                if (suppressCurrent) break;
                 if (msg.audio_event?.audio_base_64) {
                     playChunk(msg.audio_event.audio_base_64);
                 }
@@ -249,7 +207,6 @@
 
             case 'interruption':
                 flushAudio();
-                suppressCurrent = false;
                 break;
 
             case 'ping':
