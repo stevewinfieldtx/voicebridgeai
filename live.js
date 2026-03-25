@@ -102,9 +102,7 @@
         curFrom = from;
         curTo   = to;
         reconnects = 0;
-        lastSpeechAt = 0;
         pendingRow = null;
-        suppressCurrent = false;
 
         setStatus('connecting', 'Connecting\u2026');
         lockUI(true);
