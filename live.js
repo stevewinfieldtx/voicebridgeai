@@ -84,12 +84,9 @@
     let lastPong = 0;
     let watchdog = null;
 
-    // Session params — which language is "English" and which is "other"
+    // Session params
     let curFrom = '';
     let curTo = '';
-    let englishCode = '';   // whichever of from/to is 'en'
-    let otherCode = '';     // the non-English language
-    let otherName = '';     // display name for the other language
 
     // Idle suppression
     let lastSpeechAt = 0;
@@ -97,7 +94,6 @@
 
     // Transcript pairing
     let pendingRow = null;
-    let pendingIsEnglish = false; // was the pending user_transcript English?
 
     // ---- Init UI ----
     LANGS.forEach(l => {
@@ -118,17 +114,7 @@
     $toSelect.addEventListener('change',   () => localStorage.setItem('vb-live-to',   $toSelect.value));
     $startBtn.addEventListener('click',     () => active ? stop() : start());
 
-    // =========================================================
-    //  LANGUAGE DETECTION (simple heuristic)
-    //  Used to determine which column text belongs in.
-    // =========================================================
-    function isLikelyEnglish(text) {
-        if (!text) return true;
-        // Count characters outside basic ASCII range
-        const nonAscii = text.replace(/[\x00-\x7F]/g, '').length;
-        // If less than 15% non-ASCII, likely English
-        return nonAscii / text.length < 0.15;
-    }
+    // (language detection removed — columns are now Original | Translation)
 
     // =========================================================
     //  START SESSION
@@ -140,16 +126,6 @@
 
         curFrom = from;
         curTo   = to;
-
-        // Determine which is English
-        if (from === 'en') {
-            englishCode = 'en';
-            otherCode = to;
-        } else {
-            englishCode = 'en';
-            otherCode = from === 'en' ? to : from;
-        }
-
         reconnects = 0;
         lastSpeechAt = 0;
         pendingRow = null;
@@ -183,12 +159,9 @@
     async function connect() {
         const { signedUrl, languages } = await fetchAgent();
 
-        // Find the other language name from the response
-        otherName = (curFrom === 'en') ? languages.b : languages.a;
-
         if (reconnects === 0) {
-            setColumnHeaders(otherName);
-            log(`Agent ready: English \u2194 ${otherName}`, 'system');
+            setColumnHeaders();
+            log(`Agent ready: ${languages.a} \u2194 ${languages.b}`, 'system');
         } else {
             log(`Reconnected (attempt ${reconnects})`, 'system');
         }
@@ -244,9 +217,7 @@
                 if (text && text.trim().length >= MIN_RESPONSE_LEN) {
                     lastSpeechAt = Date.now();
                     suppressCurrent = false;
-                    const isEn = isLikelyEnglish(text);
-                    pendingIsEnglish = isEn;
-                    addTranscriptRow(text, null, isEn);
+                    addOriginalRow(text);
                 }
                 break;
             }
@@ -433,88 +404,62 @@
     }
 
     // =========================================================
-    //  TRANSCRIPT UI — Two fixed columns
-    //  Left column = ALWAYS English
-    //  Right column = ALWAYS other language
+    //  TRANSCRIPT UI — Two columns
+    //  Left  = Original (what was spoken)
+    //  Right = Translation (agent response)
     // =========================================================
-    function setColumnHeaders(otherLangName) {
+    function setColumnHeaders() {
         const hFrom = document.getElementById('col-header-from');
         const hTo   = document.getElementById('col-header-to');
-        if (hFrom) hFrom.textContent = '\uD83C\uDDFA\uD83C\uDDF8 English';
-        if (hTo)   hTo.textContent   = `\uD83C\uDF10 ${otherLangName}`;
+        if (hFrom) hFrom.textContent = '\uD83D\uDDE3\uFE0F Original';
+        if (hTo)   hTo.textContent   = '\uD83C\uDF10 Translation';
     }
 
-    /**
-     * Add a new transcript row.
-     * @param {string} text       - the user's spoken text
-     * @param {string|null} trans - translation (null = pending)
-     * @param {boolean} isEnglish - was the spoken text English?
-     */
-    function addTranscriptRow(text, trans, isEnglish) {
+    function addOriginalRow(text) {
         hideEmpty();
 
         const row = document.createElement('div');
         row.className = 'msg-row';
 
-        const enCell = document.createElement('div');
-        const otherCell = document.createElement('div');
+        const left = document.createElement('div');
+        left.className = 'msg-cell col-from';
+        left.textContent = text;
 
-        if (isEnglish) {
-            // User spoke English → English text left, translation pending right
-            enCell.className = 'msg-cell col-from';
-            enCell.textContent = text;
-            otherCell.className = 'msg-cell col-to empty';
-            otherCell.textContent = '\u2026';
-        } else {
-            // User spoke other language → other text right, translation pending left
-            enCell.className = 'msg-cell col-from empty';
-            enCell.textContent = '\u2026';
-            otherCell.className = 'msg-cell col-to';
-            otherCell.textContent = text;
-        }
+        const right = document.createElement('div');
+        right.className = 'msg-cell col-to empty';
+        right.textContent = '\u2026';
 
-        row.appendChild(enCell);
-        row.appendChild(otherCell);
+        row.appendChild(left);
+        row.appendChild(right);
         $transcript.appendChild(row);
         pendingRow = row;
         scrollDown();
     }
 
-    /**
-     * Fill in the translation for the pending row.
-     */
     function fillTranslation(text) {
         hideEmpty();
 
         if (pendingRow) {
-            // Find the cell that's still marked 'empty'
-            const emptyCell = pendingRow.querySelector('.msg-cell.empty');
-            if (emptyCell) {
-                emptyCell.textContent = text;
-                emptyCell.classList.remove('empty');
+            const cell = pendingRow.querySelector('.msg-cell.col-to');
+            if (cell) {
+                cell.textContent = text;
+                cell.classList.remove('empty');
             }
             pendingRow = null;
         } else {
-            // Standalone agent response (no pending user row)
+            // Standalone translation (no pending original)
             const row = document.createElement('div');
             row.className = 'msg-row';
 
-            const isEn = isLikelyEnglish(text);
-            const enCell = document.createElement('div');
-            const otherCell = document.createElement('div');
+            const left = document.createElement('div');
+            left.className = 'msg-cell col-from empty';
 
-            if (isEn) {
-                enCell.className = 'msg-cell col-from';
-                enCell.textContent = text;
-                otherCell.className = 'msg-cell col-to empty';
-            } else {
-                enCell.className = 'msg-cell col-from empty';
-                otherCell.className = 'msg-cell col-to';
-                otherCell.textContent = text;
-            }
+            const right = document.createElement('div');
+            right.className = 'msg-cell col-to';
+            right.textContent = text;
 
-            row.appendChild(enCell);
-            row.appendChild(otherCell);
+            row.appendChild(left);
+            row.appendChild(right);
             $transcript.appendChild(row);
         }
         scrollDown();
@@ -523,10 +468,10 @@
     function updateLastTranslation(text) {
         const rows = $transcript.querySelectorAll('.msg-row');
         if (rows.length) {
-            const emptyCell = rows[rows.length - 1].querySelector('.msg-cell.empty');
-            if (emptyCell) {
-                emptyCell.textContent = text;
-                emptyCell.classList.remove('empty');
+            const cell = rows[rows.length - 1].querySelector('.msg-cell.col-to');
+            if (cell) {
+                cell.textContent = text;
+                cell.classList.remove('empty');
             }
         }
     }
