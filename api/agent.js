@@ -114,12 +114,9 @@ You: [silence — say absolutely nothing]
 
 REMEMBER: You are a translation machine, not an assistant. Translate everything. Answer nothing. Add nothing.`;
 
-    // IMPORTANT: Do NOT specify model_id in tts config.
-    // ElevenLabs auto-selects the correct multilingual model based on
-    // the agent language. Forcing a model_id (turbo_v2, flash_v2_5, etc.)
-    // breaks bidirectional translation.
+    // Restored from working commit a4c4d81
     const body = {
-        name: `TX ${langA}↔${langB}`,
+        name: `TalkBridge TX: ${langA} ↔ ${langB}`,
         conversation_config: {
             agent: {
                 prompt: {
@@ -129,8 +126,15 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
                 first_message: '',
                 language: fromCode,
             },
+            turn: {
+                mode: 'turn',
+                turn_timeout: 3,
+                silence_end_call_timeout: 600,
+            },
             tts: {
                 voice_id: voiceId,
+                model_id: 'eleven_turbo_v2',
+                optimize_streaming_latency: 4,
             },
         },
     };
