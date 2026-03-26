@@ -133,7 +133,6 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
             },
             tts: {
                 voice_id: voiceId,
-                model_id: 'eleven_turbo_v2',
                 optimize_streaming_latency: 4,
             },
         },
