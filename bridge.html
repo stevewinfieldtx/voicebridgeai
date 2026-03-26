@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TalkBridge — Bridge Mode</title>
+    <meta name="description" content="Two phones, two agents, one conversation. Real-time translation across devices.">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=3">
+    <style>
+        .bridge-container {
+            position: relative;
+            z-index: 1;
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 0 16px;
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        .bridge-header {
+            text-align: center;
+            padding: 16px 0 4px;
+        }
+        .bridge-header-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        .bridge-back {
+            position: absolute;
+            left: 0;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.82rem;
+            font-weight: 500;
+            padding: 6px 0;
+            transition: color var(--transition);
+        }
+        .bridge-back:hover { color: var(--accent-en); }
+        .bridge-back svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .bridge-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .bridge-logo h1 {
+            font-size: 1.4rem;
+            font-weight: 800;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.03em;
+        }
+        .bridge-tagline {
+            font-size: 0.71rem;
+            color: var(--text-muted);
+            margin-top: 3px;
+        }
+
+        /* ---- Room Setup Panel ---- */
+        .room-panel {
+            margin-top: 16px;
+            padding: 20px;
+            border-radius: var(--radius-lg);
+            background: var(--bg-card);
+            backdrop-filter: blur(var(--glass-blur));
+            -webkit-backdrop-filter: blur(var(--glass-blur));
+            border: 1px solid var(--border-subtle);
+        }
+        .room-panel.hidden { display: none; }
+
+        .room-panel h2 {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 14px;
+        }
+
+        .lang-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .lang-label {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            min-width: 75px;
+            flex-shrink: 0;
+        }
+        .lang-select {
+            flex: 1;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.85rem;
+            padding: 10px 32px 10px 12px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            appearance: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+            transition: border-color var(--transition);
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%234e4e6a'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            background-color: var(--bg-card);
+        }
+        .lang-select:focus { outline: none; border-color: var(--accent-en); }
+        .lang-select option { background: #1a1a2e; color: var(--text-primary); }
+
+        .gender-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .gender-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 500;
+            min-width: 75px;
+            flex-shrink: 0;
+        }
+        .g-btn {
+            flex: 1;
+            padding: 8px 0;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-card);
+            color: var(--text-muted);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition);
+        }
+        .g-btn.active {
+            background: rgba(108, 159, 255, 0.10);
+            border-color: var(--accent-en);
+            color: var(--text-primary);
+        }
+
+        .room-action-btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: var(--radius-lg);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: linear-gradient(135deg, var(--accent-en), #a78bfa, var(--accent-vi));
+            color: #fff;
+            box-shadow: 0 4px 24px rgba(108, 99, 255, 0.3);
+        }
+        .room-action-btn:hover { transform: translateY(-1px); }
+        .room-action-btn:active { transform: translateY(0); }
+        .room-action-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+        .room-divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 16px 0;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+        }
+        .room-divider::before, .room-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border-subtle);
+        }
+
+        .join-row {
+            display: flex;
+            gap: 10px;
+        }
+        .room-code-input {
+            flex: 1;
+            font-family: 'Inter', sans-serif;
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            text-align: center;
+            padding: 12px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+        .room-code-input::placeholder {
+            font-size: 0.8rem;
+            font-weight: 400;
+            letter-spacing: 0;
+            text-transform: none;
+            color: var(--text-muted);
+            opacity: 0.5;
+        }
+        .room-code-input:focus { outline: none; border-color: var(--accent-en); }
+        .join-btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: var(--radius-md);
+            background: rgba(108, 159, 255, 0.15);
+            color: var(--accent-en);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all var(--transition);
+            white-space: nowrap;
+        }
+        .join-btn:hover { background: rgba(108, 159, 255, 0.25); }
+
+        /* ---- Active Session Panel ---- */
+        .session-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            margin-top: 12px;
+        }
+        .session-panel.hidden { display: none; }
+
+        .session-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            border-radius: var(--radius-md);
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            margin-bottom: 10px;
+        }
+        .session-code {
+            font-size: 1.1rem;
+            font-weight: 800;
+            letter-spacing: 0.12em;
+            color: var(--accent-en);
+            font-family: 'Inter', monospace;
+        }
+        .copy-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            font-size: 0.75rem;
+        }
+        .copy-btn:hover { color: var(--text-primary); }
+        .member-count {
+            margin-left: auto;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            background: rgba(81, 207, 102, 0.1);
+            padding: 3px 8px;
+            border-radius: 20px;
+        }
+
+        /* Start/Stop + Status */
+        .session-start-btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: var(--radius-lg);
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: all 0.3s ease;
+            background: linear-gradient(135deg, var(--accent-en), #a78bfa, var(--accent-vi));
+            color: #fff;
+            box-shadow: 0 4px 24px rgba(108, 99, 255, 0.3);
+        }
+        .session-start-btn:hover { transform: translateY(-1px); }
+        .session-start-btn:active { transform: translateY(0); }
+        .session-start-btn.active {
+            background: linear-gradient(135deg, #FF4757, #FF6B81);
+            box-shadow: 0 4px 24px rgba(255, 71, 87, 0.35);
+        }
+        .session-start-btn svg { width: 20px; height: 20px; }
+
+        .session-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            justify-content: center;
+            padding: 8px 0;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+        .s-dot {
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.15);
+            transition: background 0.3s;
+        }
+        .s-dot.connecting { background: #FFD43B; animation: blink 1s ease-in-out infinite; }
+        .s-dot.active     { background: #51CF66; animation: blink 2s ease-in-out infinite; }
+        .s-dot.speaking   { background: var(--accent-en); animation: blink 0.8s ease-in-out infinite; }
+        .s-dot.error      { background: #FF4757; }
+
+        /* Transcript */
+        .bridge-transcript {
+            flex: 1;
+            min-height: 180px;
+            max-height: calc(100dvh - 460px);
+            overflow-y: auto;
+            padding: 12px;
+            border-radius: var(--radius-lg);
+            background: var(--bg-card);
+            backdrop-filter: blur(var(--glass-blur));
+            -webkit-backdrop-filter: blur(var(--glass-blur));
+            border: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            scroll-behavior: smooth;
+        }
+        .bridge-transcript::-webkit-scrollbar { width: 3px; }
+        .bridge-transcript::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 3px; }
+
+        .transcript-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            flex: 1;
+            color: var(--text-muted);
+            opacity: 0.35;
+        }
+        .transcript-empty svg { width: 36px; height: 36px; }
+        .transcript-empty p   { font-size: 0.82rem; }
+
+        /* Column headers */
+        .col-headers {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            padding: 0 0 6px;
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: var(--bg-card);
+        }
+        .col-hdr {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 8px 12px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .col-hdr.original-col {
+            color: var(--accent-en);
+            background: rgba(108,159,255,0.08);
+            border-bottom: 2px solid rgba(108, 159, 255, 0.2);
+        }
+        .col-hdr.translation-col {
+            color: var(--accent-vi);
+            background: rgba(255,101,132,0.08);
+            border-bottom: 2px solid rgba(255, 101, 132, 0.2);
+        }
+
+        /* Message rows */
+        .b-msg-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 8px;
+            animation: msgIn 0.35s ease-out;
+        }
+        .b-msg-cell {
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 0.87rem;
+            line-height: 1.5;
+            word-break: break-word;
+            min-height: 36px;
+        }
+        .b-msg-cell.original {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            border-left: 3px solid rgba(108, 159, 255, 0.3);
+        }
+        .b-msg-cell.translation {
+            background: rgba(255, 101, 132, 0.08);
+            border: 1px solid rgba(255, 101, 132, 0.12);
+            color: #ffb0c0;
+            font-weight: 500;
+        }
+        .b-msg-cell.empty { opacity: 0.15; border: 1px dashed var(--border-subtle); }
+
+        /* Sender tag */
+        .sender-tag {
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            padding: 2px 8px;
+            border-radius: 4px;
+            display: inline-block;
+            margin-bottom: 4px;
+        }
+        .sender-tag.you {
+            color: var(--accent-en);
+            background: rgba(108, 159, 255, 0.1);
+        }
+        .sender-tag.partner {
+            color: var(--accent-vi);
+            background: rgba(255, 101, 132, 0.1);
+        }
+
+        /* System messages */
+        .b-system {
+            color: var(--text-muted);
+            font-size: 0.76rem;
+            padding: 2px 8px;
+            opacity: 0.6;
+        }
+        .b-error {
+            color: #FF6B81;
+            font-size: 0.76rem;
+            padding: 4px 8px;
+        }
+
+        @keyframes msgIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Leave button */
+        .leave-btn {
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px solid rgba(255, 71, 87, 0.2);
+            border-radius: var(--radius-md);
+            background: rgba(255, 71, 87, 0.06);
+            color: #FF6B81;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: center;
+            transition: all var(--transition);
+        }
+        .leave-btn:hover { background: rgba(255, 71, 87, 0.12); }
+
+        .bridge-footer {
+            padding: 10px 0 14px;
+            text-align: center;
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            opacity: 0.3;
+        }
+    </style>
+</head>
+<body>
+    <div class="bridge-container">
+
+        <!-- Header -->
+        <header class="bridge-header">
+            <div class="bridge-header-row">
+                <a href="index.html" class="bridge-back">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M15 18l-6-6 6-6"/>
+                    </svg>
+                    Back
+                </a>
+                <div>
+                    <div class="bridge-logo">
+                        <svg width="26" height="26" viewBox="0 0 40 40" fill="none">
+                            <circle cx="20" cy="20" r="18" stroke="url(#bg)" stroke-width="2"/>
+                            <path d="M13 20 Q20 10 27 20 Q20 30 13 20Z" fill="url(#bg)" opacity="0.85"/>
+                            <defs>
+                                <linearGradient id="bg" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+                                    <stop offset="0%"   stop-color="#6C9FFF"/>
+                                    <stop offset="50%"  stop-color="#a78bfa"/>
+                                    <stop offset="100%" stop-color="#FF6584"/>
+                                </linearGradient>
+                            </defs>
+                        </svg>
+                        <h1>Bridge Mode</h1>
+                    </div>
+                    <p class="bridge-tagline">Two phones &middot; two agents &middot; one conversation</p>
+                </div>
+            </div>
+        </header>
+
+        <!-- Room Setup Panel -->
+        <div class="room-panel" id="room-panel">
+            <h2>Set Up Your Side</h2>
+
+            <div class="lang-row">
+                <span class="lang-label">I speak</span>
+                <select id="my-lang" class="lang-select"></select>
+            </div>
+            <div class="lang-row">
+                <span class="lang-label">Partner speaks</span>
+                <select id="partner-lang" class="lang-select"></select>
+            </div>
+            <div class="gender-row">
+                <span class="gender-label">Voice</span>
+                <button class="g-btn active" id="g-female" data-gender="female">Female</button>
+                <button class="g-btn"        id="g-male"   data-gender="male">Male</button>
+            </div>
+
+            <button class="room-action-btn" id="create-btn">Create Room</button>
+
+            <div class="room-divider">OR</div>
+
+            <div class="join-row">
+                <input type="text" class="room-code-input" id="join-code" placeholder="Room code" maxlength="6" autocapitalize="characters" spellcheck="false">
+                <button class="join-btn" id="join-btn">Join</button>
+            </div>
+        </div>
+
+        <!-- Active Session Panel -->
+        <div class="session-panel hidden" id="session-panel">
+
+            <div class="session-info">
+                <span class="session-code" id="room-code-display"></span>
+                <button class="copy-btn" id="copy-code-btn" title="Copy room code">Copy</button>
+                <span class="member-count" id="member-count">1 online</span>
+            </div>
+
+            <button class="session-start-btn" id="start-btn">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="12" y1="19" x2="12" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="8"  y1="23" x2="16" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span class="btn-label">Start Translating</span>
+            </button>
+
+            <div class="session-status">
+                <div class="s-dot" id="s-dot"></div>
+                <span id="s-text">Ready</span>
+            </div>
+
+            <div class="bridge-transcript" id="transcript">
+                <div class="col-headers" id="col-headers" style="display:none;">
+                    <div class="col-hdr original-col" id="col-hdr-orig">Original</div>
+                    <div class="col-hdr translation-col" id="col-hdr-trans">Translation</div>
+                </div>
+                <div class="transcript-empty" id="transcript-empty">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                        <line x1="12" y1="19" x2="12" y2="23"/>
+                        <line x1="8"  y1="23" x2="16" y2="23"/>
+                    </svg>
+                    <p>Press Start to begin translating</p>
+                </div>
+            </div>
+
+            <button class="leave-btn" id="leave-btn">Leave Room</button>
+        </div>
+
+        <div class="bridge-footer">Powered by ElevenLabs Conversational AI</div>
+    </div>
+
+    <script src="bridge.js?v=1"></script>
+</body>
+</html>
