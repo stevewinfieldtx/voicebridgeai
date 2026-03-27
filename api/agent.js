@@ -1,13 +1,14 @@
 /* =========================================
    TalkBridge — ElevenLabs Agent API
-   GET /api/agent?from=en&to=vi&gender=female
-   Creates (or reuses) an ElevenLabs Conversational AI
-   agent configured as a strict bidirectional translator,
-   then returns a signed WebSocket URL.
-   ========================================= */
+   GET /api/agent?from=en&to=vi
 
-const agentCache = {};
-const CACHE_TTL = 30 * 60 * 1000; // 30 min
+   Looks up a pre-configured agent by language pair
+   from env vars (e.g. ELEVENLABS_AGENT_EN_VI).
+   All agent config (LLM, voice, prompt) is managed
+   in the ElevenLabs dashboard — not in code.
+
+   Falls back to dynamic creation if no env var exists.
+   ========================================= */
 
 const LANG = {
     en: 'English', vi: 'Vietnamese', es: 'Spanish', fr: 'French',
@@ -16,9 +17,13 @@ const LANG = {
     zh: 'Chinese', ja: 'Japanese',   ko: 'Korean',  th: 'Thai',
 };
 
+// Fallback: in-memory cache for dynamically created agents
+const agentCache = {};
+const CACHE_TTL = 30 * 60 * 1000;
+
 const VOICES = {
-    male:   'nPczCjzI2devNBz1zQrb', // Brian
-    female: 'EXAVITQu4vr4xnSDxMaL', // Aria
+    male:   'nPczCjzI2devNBz1zQrb',
+    female: 'EXAVITQu4vr4xnSDxMaL',
 };
 
 module.exports = async (req, res) => {
@@ -41,21 +46,31 @@ module.exports = async (req, res) => {
         return res.status(400).json({ error: 'Languages must differ' });
     }
 
-    const cacheKey = `${from}|${to}|${gender}`;
     const langA = LANG[from];
     const langB = LANG[to];
 
     try {
-        let agentId = getCached(cacheKey);
+        // Step 1: Check for pre-configured agent in env vars
+        // e.g. ELEVENLABS_AGENT_EN_VI=agentIdHere
+        const envKey = `ELEVENLABS_AGENT_${from.toUpperCase()}_${to.toUpperCase()}`;
+        let agentId = process.env[envKey] || null;
+
+        // Step 2: Fall back to dynamic creation if no env var
         if (!agentId) {
-            agentId = await createAgent(API_KEY, from, to, langA, langB, VOICES[gender]);
-            agentCache[cacheKey] = { agentId, ts: Date.now() };
+            const cacheKey = `${from}|${to}|${gender}`;
+            agentId = getCached(cacheKey);
+            if (!agentId) {
+                agentId = await createAgent(API_KEY, from, to, langA, langB, VOICES[gender]);
+                agentCache[cacheKey] = { agentId, ts: Date.now() };
+            }
         }
 
         const signedUrl = await getSignedUrl(API_KEY, agentId);
         return res.json({ agentId, signedUrl, from, to, languages: { a: langA, b: langB } });
     } catch (err) {
         console.error('Agent API error:', err);
+        // Clear dynamic cache on error
+        const cacheKey = `${from}|${to}|${gender}`;
         delete agentCache[cacheKey];
         return res.status(500).json({ error: err.message || 'Failed to create agent' });
     }
@@ -114,7 +129,6 @@ You: [silence — say absolutely nothing]
 
 REMEMBER: You are a translation machine, not an assistant. Translate everything. Answer nothing. Add nothing.`;
 
-    // Restored from working commit a4c4d81
     const body = {
         name: `TalkBridge TX: ${langA} ↔ ${langB}`,
         conversation_config: {
