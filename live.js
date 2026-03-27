@@ -1,13 +1,12 @@
 /* =========================================
    TalkBridge — Live Translate Mode
-   ElevenLabs Conversational AI agent for
-   seamless bidirectional voice translation.
+   OpenAI Realtime API for seamless
+   bidirectional voice translation.
    ========================================= */
 
 (function () {
     'use strict';
 
-    // ---- Language Catalog ----
     const LANGS = [
         { code: 'en', name: 'English',         flag: '\u{1F1FA}\u{1F1F8}' },
         { code: 'vi', name: 'Ti\u1EBFng Vi\u1EC7t', flag: '\u{1F1FB}\u{1F1F3}' },
@@ -27,6 +26,8 @@
         { code: 'th', name: '\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22', flag: '\u{1F1F9}\u{1F1ED}' },
     ];
 
+    const PCM_RATE = 24000; // OpenAI Realtime uses 24kHz
+
     // ---- DOM ----
     const $fromSelect   = document.getElementById('lang-from');
     const $toSelect     = document.getElementById('lang-to');
@@ -41,31 +42,26 @@
     // ---- State ----
     let ws = null;
     let mediaStream = null;
-    let micCtx = null;
+    let audioCtx = null;
     let playCtx = null;
-    let srcNode = null;
-    let procNode = null;
+    let workletNode = null;
     let active = false;
     let agentSpeaking = false;
     let gender = localStorage.getItem('vb-gender') || 'female';
 
-    // Audio scheduling
+    // Audio playback scheduling
     let nextPlayTime = 0;
     let scheduled = [];
-    const PCM_RATE = 16000;
 
     // Reconnection
     let reconnects = 0;
     const MAX_RECONNECTS = 5;
     let reconnectTimer = null;
-    let lastPong = 0;
-    let watchdog = null;
 
-    // Session params
+    // Session
     let curFrom = '';
     let curTo = '';
-
-    // (no idle suppression — matching original working code)
+    let sessionPrompt = '';
 
     // Transcript pairing
     let pendingRow = null;
@@ -89,8 +85,6 @@
     $toSelect.addEventListener('change',   () => localStorage.setItem('vb-live-to',   $toSelect.value));
     $startBtn.addEventListener('click',     () => active ? stop() : start());
 
-    // (language detection removed — columns are now Original | Translation)
-
     // =========================================================
     //  START SESSION
     // =========================================================
@@ -110,7 +104,7 @@
         try {
             if (!mediaStream) {
                 mediaStream = await navigator.mediaDevices.getUserMedia({
-                    audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+                    audio: { sampleRate: PCM_RATE, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
                 });
             }
             if (!playCtx) {
@@ -127,22 +121,29 @@
     }
 
     // =========================================================
-    //  CONNECT WEBSOCKET
+    //  CONNECT TO OPENAI REALTIME
     // =========================================================
     async function connect() {
-        const { signedUrl, languages } = await fetchAgent();
+        // Get ephemeral token + system prompt from our server
+        const r = await fetch(`/api/agent?from=${curFrom}&to=${curTo}`);
+        if (!r.ok) { const e = await r.json(); throw new Error(e.error || 'Server error'); }
+        const { ephemeralKey, languages, systemPrompt } = await r.json();
+        sessionPrompt = systemPrompt;
 
         if (reconnects === 0) {
             setColumnHeaders();
-            log(`Agent ready: ${languages.a} \u2194 ${languages.b}`, 'system');
+            log(`Ready: ${languages.a} \u2194 ${languages.b}`, 'system');
         } else {
             log(`Reconnected (attempt ${reconnects})`, 'system');
         }
 
         if (ws) { try { ws.close(); } catch (_) {} ws = null; }
 
-        ws = new WebSocket(signedUrl);
-        lastPong = Date.now();
+        // Connect with ephemeral key as subprotocol
+        ws = new WebSocket(
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview',
+            ['realtime', `openai-insecure-api-key.${ephemeralKey}`]
+        );
 
         ws.onopen = () => {
             active = true;
@@ -152,8 +153,25 @@
             $startBtn.disabled = false;
             $startBtn.querySelector('.btn-label').textContent = 'Stop';
             $startBtn.classList.add('active');
-            if (!procNode) startMicCapture();
-            startWatchdog();
+
+            // Configure the session
+            ws.send(JSON.stringify({
+                type: 'session.update',
+                session: {
+                    instructions: sessionPrompt,
+                    input_audio_transcription: {
+                        model: 'whisper-1',
+                    },
+                    turn_detection: {
+                        type: 'server_vad',
+                        threshold: 0.5,
+                        prefix_padding_ms: 300,
+                        silence_duration_ms: 500,
+                    },
+                },
+            }));
+
+            startMicCapture();
         };
 
         ws.onmessage = (e) => {
@@ -164,78 +182,89 @@
         ws.onerror = (err) => console.error('WS error:', err);
 
         ws.onclose = () => {
-            stopWatchdog();
             if (active) tryReconnect();
         };
     }
 
-    async function fetchAgent() {
-        const r = await fetch(`/api/agent?from=${curFrom}&to=${curTo}&gender=${gender}`);
-        if (!r.ok) { const e = await r.json(); throw new Error(e.error || 'Server error'); }
-        return r.json();
-    }
-
     // =========================================================
-    //  HANDLE AGENT MESSAGES
+    //  HANDLE OPENAI REALTIME MESSAGES
     // =========================================================
     function handleMsg(msg) {
         switch (msg.type) {
-            case 'conversation_initiation_metadata':
-                console.log('[ws] session started');
+            case 'session.created':
+            case 'session.updated':
+                console.log('[rt]', msg.type);
                 break;
 
-            case 'user_transcript': {
-                const text = msg.user_transcript_event?.user_transcript;
-                if (text) addOriginalRow(text);
-                break;
-            }
-
-            case 'agent_response': {
-                const text = msg.agent_response_event?.agent_response;
-                if (text) fillTranslation(text);
+            // User speech transcript
+            case 'conversation.item.input_audio_transcription.completed': {
+                const text = msg.transcript;
+                if (text && text.trim()) addOriginalRow(text.trim());
                 break;
             }
 
-            case 'audio': {
-                if (msg.audio_event?.audio_base_64) {
-                    playChunk(msg.audio_event.audio_base_64);
+            // Translation text (streaming)
+            case 'response.audio_transcript.delta':
+            case 'response.output_audio_transcript.delta': {
+                // Accumulate streaming text — update pending row
+                if (msg.delta && pendingRow) {
+                    const cell = pendingRow.querySelector('.msg-cell.col-to');
+                    if (cell) {
+                        if (cell.classList.contains('empty')) {
+                            cell.textContent = msg.delta;
+                            cell.classList.remove('empty');
+                        } else {
+                            cell.textContent += msg.delta;
+                        }
+                    }
                 }
                 break;
             }
 
-            case 'interruption':
-                flushAudio();
-                break;
-
-            case 'ping':
-                lastPong = Date.now();
-                if (ws?.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'pong', event_id: msg.ping_event?.event_id }));
-                }
-                break;
-
-            case 'agent_response_correction': {
-                const text = msg.agent_response_correction_event?.corrected_text;
-                if (text) updateLastTranslation(text);
+            // Translation text (complete)
+            case 'response.audio_transcript.done':
+            case 'response.output_audio_transcript.done': {
+                const text = msg.transcript;
+                if (text && text.trim()) fillTranslation(text.trim());
                 break;
             }
+
+            // Audio chunks
+            case 'response.audio.delta':
+            case 'response.output_audio.delta': {
+                if (msg.delta) playChunk(msg.delta);
+                break;
+            }
+
+            case 'response.audio.done':
+            case 'response.output_audio.done':
+                // Audio stream complete
+                break;
+
+            case 'error':
+                console.error('[rt] error:', msg.error);
+                if (msg.error?.message) log(`Error: ${msg.error.message}`, 'error');
+                break;
 
             default:
-                console.log('[ws]', msg.type);
+                console.log('[rt]', msg.type);
         }
     }
 
     // =========================================================
-    //  MIC CAPTURE → WEBSOCKET
+    //  MIC CAPTURE (24kHz PCM → WebSocket)
     // =========================================================
-    function startMicCapture() {
-        micCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-        srcNode = micCtx.createMediaStreamSource(mediaStream);
+    async function startMicCapture() {
+        if (audioCtx) { try { audioCtx.close(); } catch (_) {} }
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: PCM_RATE });
 
+        const source = audioCtx.createMediaStreamSource(mediaStream);
+
+        // Use ScriptProcessor (widely supported) for PCM capture
         const bufSize = 4096;
-        procNode = micCtx.createScriptProcessor(bufSize, 1, 1);
+        const proc = audioCtx.createScriptProcessor(bufSize, 1, 1);
 
-        procNode.onaudioprocess = (e) => {
+        proc.onaudioprocess = (e) => {
             if (!active || !ws || ws.readyState !== WebSocket.OPEN) return;
 
             const raw = e.inputBuffer.getChannelData(0);
@@ -249,15 +278,19 @@
             let bin = '';
             for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
 
-            ws.send(JSON.stringify({ user_audio_chunk: btoa(bin) }));
+            ws.send(JSON.stringify({
+                type: 'input_audio_buffer.append',
+                audio: btoa(bin),
+            }));
         };
 
-        srcNode.connect(procNode);
-        procNode.connect(micCtx.destination);
+        source.connect(proc);
+        proc.connect(audioCtx.destination);
+        workletNode = proc; // store for cleanup
     }
 
     // =========================================================
-    //  AUDIO PLAYBACK (PCM 16kHz → Speaker)
+    //  AUDIO PLAYBACK (24kHz PCM)
     // =========================================================
     function playChunk(b64) {
         if (!playCtx) return;
@@ -305,7 +338,7 @@
     }
 
     // =========================================================
-    //  RECONNECT + WATCHDOG
+    //  RECONNECT
     // =========================================================
     function tryReconnect() {
         if (!active) return;
@@ -326,29 +359,15 @@
         }, delay);
     }
 
-    function startWatchdog() {
-        stopWatchdog();
-        watchdog = setInterval(() => {
-            if (!active || !ws) return;
-            if (Date.now() - lastPong > 30000) {
-                console.warn('Watchdog: no pong in 30s');
-                try { ws.close(); } catch (_) {}
-            }
-        }, 15000);
-    }
-    function stopWatchdog() { if (watchdog) { clearInterval(watchdog); watchdog = null; } }
-
     // =========================================================
     //  STOP SESSION
     // =========================================================
     function stop() {
         active = false;
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-        stopWatchdog();
         if (ws) { ws.close(); ws = null; }
-        if (procNode)    { procNode.disconnect(); procNode = null; }
-        if (srcNode)     { srcNode.disconnect();  srcNode = null; }
-        if (micCtx)      { micCtx.close();  micCtx = null; }
+        if (workletNode) { workletNode.disconnect(); workletNode = null; }
+        if (audioCtx)    { audioCtx.close(); audioCtx = null; }
         if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
         flushAudio();
         if (playCtx) { playCtx.close(); playCtx = null; }
@@ -359,20 +378,17 @@
     }
 
     // =========================================================
-    //  TRANSCRIPT UI — Two columns
-    //  Left  = Original (what was spoken)
-    //  Right = Translation (agent response)
+    //  TRANSCRIPT UI — Original | Translation
     // =========================================================
     function setColumnHeaders() {
-        const hFrom = document.getElementById('col-header-from');
-        const hTo   = document.getElementById('col-header-to');
-        if (hFrom) hFrom.textContent = '\uD83D\uDDE3\uFE0F Original';
-        if (hTo)   hTo.textContent   = '\uD83C\uDF10 Translation';
+        const el = document.getElementById('transcript-empty');
+        if (el) el.style.display = 'none';
+        const hdr = document.getElementById('col-headers');
+        if (hdr) hdr.style.display = '';
     }
 
     function addOriginalRow(text) {
-        hideEmpty();
-
+        setColumnHeaders();
         const row = document.createElement('div');
         row.className = 'msg-row';
 
@@ -392,8 +408,6 @@
     }
 
     function fillTranslation(text) {
-        hideEmpty();
-
         if (pendingRow) {
             const cell = pendingRow.querySelector('.msg-cell.col-to');
             if (cell) {
@@ -401,50 +415,17 @@
                 cell.classList.remove('empty');
             }
             pendingRow = null;
-        } else {
-            // Standalone translation (no pending original)
-            const row = document.createElement('div');
-            row.className = 'msg-row';
-
-            const left = document.createElement('div');
-            left.className = 'msg-cell col-from empty';
-
-            const right = document.createElement('div');
-            right.className = 'msg-cell col-to';
-            right.textContent = text;
-
-            row.appendChild(left);
-            row.appendChild(right);
-            $transcript.appendChild(row);
         }
         scrollDown();
     }
 
-    function updateLastTranslation(text) {
-        const rows = $transcript.querySelectorAll('.msg-row');
-        if (rows.length) {
-            const cell = rows[rows.length - 1].querySelector('.msg-cell.col-to');
-            if (cell) {
-                cell.textContent = text;
-                cell.classList.remove('empty');
-            }
-        }
-    }
-
     function log(text, type) {
-        hideEmpty();
+        setColumnHeaders();
         const div = document.createElement('div');
         div.className = `transcript-line ${type}`;
         div.textContent = type === 'system' ? `\u2014 ${text}` : text;
         $transcript.appendChild(div);
         scrollDown();
-    }
-
-    function hideEmpty() {
-        const el = document.getElementById('transcript-empty');
-        if (el) el.style.display = 'none';
-        const hdr = document.getElementById('col-headers');
-        if (hdr) hdr.style.display = '';
     }
 
     function scrollDown() { $transcript.scrollTop = $transcript.scrollHeight; }

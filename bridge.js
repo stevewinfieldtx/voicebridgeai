@@ -1,14 +1,12 @@
 /* =========================================
    TalkBridge — Bridge Mode
-   Two phones, two one-directional agents,
-   one shared room for full bidirectional
-   voice translation.
+   Two phones, two one-directional sessions,
+   one shared room. OpenAI Realtime API.
    ========================================= */
 
 (function () {
     'use strict';
 
-    // ---- Language Catalog ----
     const LANGS = [
         { code: 'en', name: 'English',         flag: '\u{1F1FA}\u{1F1F8}' },
         { code: 'vi', name: 'Ti\u1EBFng Vi\u1EC7t', flag: '\u{1F1FB}\u{1F1F3}' },
@@ -27,6 +25,8 @@
         { code: 'ko', name: '\uD55C\uAD6D\uC5B4', flag: '\u{1F1F0}\u{1F1F7}' },
         { code: 'th', name: '\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22', flag: '\u{1F1F9}\u{1F1ED}' },
     ];
+
+    const PCM_RATE = 24000;
 
     // ---- DOM ----
     const $roomPanel    = document.getElementById('room-panel');
@@ -60,29 +60,26 @@
     let pollTimer = null;
     let heartTimer = null;
 
-    // Agent / WebSocket
+    // OpenAI Realtime
     let ws = null;
     let mediaStream = null;
-    let micCtx = null;
+    let audioCtx = null;
     let playCtx = null;
-    let srcNode = null;
-    let procNode = null;
+    let workletNode = null;
     let active = false;
     let agentSpeaking = false;
+    let sessionPrompt = '';
 
     // Audio scheduling
     let nextPlayTime = 0;
     let scheduled = [];
-    const PCM_RATE = 16000;
 
     // Reconnection
     let reconnects = 0;
     const MAX_RECONNECTS = 5;
     let reconnectTimer = null;
-    let lastPong = 0;
-    let watchdog = null;
 
-    // Transcript pairing — hold source until agent responds
+    // Transcript pairing
     let pendingRow = null;
     let pendingSource = '';
 
@@ -109,7 +106,6 @@
     $leaveBtn.addEventListener('click',      leaveRoom);
     $copyBtn.addEventListener('click',       copyRoomCode);
 
-    // Clean up on page close
     window.addEventListener('beforeunload', () => {
         if (roomCode && memberId) {
             navigator.sendBeacon('/api/room', JSON.stringify({ action: 'leave', roomCode, memberId }));
@@ -133,7 +129,6 @@
         myLang = $myLang.value;
         partnerLang = $partnerLang.value;
         if (myLang === partnerLang) { alert('Languages must be different'); return; }
-
         $createBtn.disabled = true;
         try {
             const data = await roomApi('create', { roomCode: null, memberId: null });
@@ -141,9 +136,7 @@
             roomCode = data.roomCode;
             memberId = data.memberId;
             enterSession();
-        } catch (err) {
-            alert('Failed to create room: ' + err.message);
-        }
+        } catch (err) { alert('Failed to create room: ' + err.message); }
         $createBtn.disabled = false;
     }
 
@@ -152,7 +145,6 @@
         myLang = $myLang.value;
         partnerLang = $partnerLang.value;
         if (myLang === partnerLang) { alert('Languages must be different'); return; }
-
         $joinBtn.disabled = true;
         try {
             const data = await roomApi('join', { roomCode: code.toUpperCase(), memberId: null });
@@ -160,9 +152,7 @@
             roomCode = data.roomCode;
             memberId = data.memberId;
             enterSession();
-        } catch (err) {
-            alert('Failed to join room: ' + err.message);
-        }
+        } catch (err) { alert('Failed to join room: ' + err.message); }
         $joinBtn.disabled = false;
     }
 
@@ -180,9 +170,7 @@
         stopSession();
         stopPolling();
         stopHeartbeat();
-        if (roomCode && memberId) {
-            try { await roomApi('leave'); } catch (_) {}
-        }
+        if (roomCode && memberId) { try { await roomApi('leave'); } catch (_) {} }
         roomCode = null;
         memberId = null;
         $sessionPanel.classList.add('hidden');
@@ -198,11 +186,7 @@
         }
     }
 
-    // ---- Polling ----
-    function startPolling() {
-        stopPolling();
-        pollTimer = setInterval(poll, 1800);
-    }
+    function startPolling() { stopPolling(); pollTimer = setInterval(poll, 1800); }
     function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
     async function poll() {
@@ -212,53 +196,43 @@
             if (data.messages) {
                 data.messages.forEach(m => {
                     if (m.seq > lastSeq) lastSeq = m.seq;
-                    if (m.memberId === memberId) return; // skip own
+                    if (m.memberId === memberId) return;
                     addRemoteMessage(m.sourceText, m.translatedText);
                 });
             }
         } catch (_) {}
     }
 
-    // ---- Heartbeat ----
     function startHeartbeat() {
         stopHeartbeat();
         heartTimer = setInterval(async () => {
             if (!roomCode || !memberId) return;
             try {
                 const data = await roomApi('heartbeat');
-                if (data.memberCount != null) {
-                    $memberCount.textContent = `${data.memberCount} online`;
-                }
+                if (data.memberCount != null) $memberCount.textContent = `${data.memberCount} online`;
             } catch (_) {}
         }, 25000);
     }
     function stopHeartbeat() { if (heartTimer) { clearInterval(heartTimer); heartTimer = null; } }
 
-    // ---- Broadcast transcript pair to room ----
     function broadcastPair(sourceText, translatedText) {
         if (!roomCode || !memberId) return;
-        roomApi('send', {
-            sourceText,
-            translatedText,
-            fromLang: myLang,
-            toLang: partnerLang,
-        }).catch(() => {});
+        roomApi('send', { sourceText, translatedText, fromLang: myLang, toLang: partnerLang }).catch(() => {});
     }
 
     // =========================================================
-    //  AGENT CONNECTION
+    //  OPENAI REALTIME CONNECTION
     // =========================================================
     async function startSession() {
         reconnects = 0;
         pendingRow = null;
         pendingSource = '';
-
         setStatus('connecting', 'Connecting\u2026');
 
         try {
             if (!mediaStream) {
                 mediaStream = await navigator.mediaDevices.getUserMedia({
-                    audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+                    audio: { sampleRate: PCM_RATE, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
                 });
             }
             if (!playCtx) {
@@ -274,9 +248,10 @@
     }
 
     async function connectAgent() {
-        const r = await fetch(`/api/agent?from=${myLang}&to=${partnerLang}&gender=${gender}`);
+        const r = await fetch(`/api/agent?from=${myLang}&to=${partnerLang}`);
         if (!r.ok) { const e = await r.json(); throw new Error(e.error || 'Server error'); }
-        const { signedUrl, languages } = await r.json();
+        const { ephemeralKey, languages, systemPrompt } = await r.json();
+        sessionPrompt = systemPrompt;
 
         if (reconnects === 0) {
             showColumnHeaders();
@@ -287,8 +262,10 @@
 
         if (ws) { try { ws.close(); } catch (_) {} ws = null; }
 
-        ws = new WebSocket(signedUrl);
-        lastPong = Date.now();
+        ws = new WebSocket(
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview',
+            ['realtime', `openai-insecure-api-key.${ephemeralKey}`]
+        );
 
         ws.onopen = () => {
             active = true;
@@ -296,8 +273,22 @@
             setStatus('active', 'Listening\u2026');
             $startBtn.querySelector('.btn-label').textContent = 'Stop';
             $startBtn.classList.add('active');
-            if (!procNode) startMicCapture();
-            startWatchdog();
+
+            ws.send(JSON.stringify({
+                type: 'session.update',
+                session: {
+                    instructions: sessionPrompt,
+                    input_audio_transcription: { model: 'whisper-1' },
+                    turn_detection: {
+                        type: 'server_vad',
+                        threshold: 0.5,
+                        prefix_padding_ms: 300,
+                        silence_duration_ms: 500,
+                    },
+                },
+            }));
+
+            startMicCapture();
         };
 
         ws.onmessage = (e) => {
@@ -306,65 +297,64 @@
         };
 
         ws.onerror = (err) => console.error('WS error:', err);
-
-        ws.onclose = () => {
-            stopWatchdog();
-            if (active) tryReconnect();
-        };
+        ws.onclose = () => { if (active) tryReconnect(); };
     }
 
     // =========================================================
-    //  HANDLE AGENT MESSAGES
+    //  HANDLE OPENAI REALTIME MESSAGES
     // =========================================================
     function handleMsg(msg) {
         switch (msg.type) {
-            case 'conversation_initiation_metadata':
-                console.log('[bridge] session started');
+            case 'session.created':
+            case 'session.updated':
+                console.log('[bridge]', msg.type);
                 break;
 
-            case 'user_transcript': {
-                const text = msg.user_transcript_event?.user_transcript;
-                if (text) {
-                    pendingSource = text;
-                    addLocalOriginal(text);
+            case 'conversation.item.input_audio_transcription.completed': {
+                const text = msg.transcript;
+                if (text && text.trim()) {
+                    pendingSource = text.trim();
+                    addLocalOriginal(pendingSource);
                 }
                 break;
             }
 
-            case 'agent_response': {
-                const text = msg.agent_response_event?.agent_response;
-                if (text) {
-                    fillLocalTranslation(text);
-                    // Broadcast the complete pair to the room
-                    broadcastPair(pendingSource, text);
+            case 'response.audio_transcript.delta':
+            case 'response.output_audio_transcript.delta': {
+                if (msg.delta && pendingRow) {
+                    const cell = pendingRow.querySelector('.b-msg-cell.translation');
+                    if (cell) {
+                        if (cell.classList.contains('empty')) {
+                            cell.textContent = msg.delta;
+                            cell.classList.remove('empty');
+                        } else {
+                            cell.textContent += msg.delta;
+                        }
+                    }
+                }
+                break;
+            }
+
+            case 'response.audio_transcript.done':
+            case 'response.output_audio_transcript.done': {
+                const text = msg.transcript;
+                if (text && text.trim()) {
+                    fillLocalTranslation(text.trim());
+                    broadcastPair(pendingSource, text.trim());
                     pendingSource = '';
                 }
                 break;
             }
 
-            case 'audio': {
-                if (msg.audio_event?.audio_base_64) {
-                    playChunk(msg.audio_event.audio_base_64);
-                }
-                break;
-            }
-
-            case 'interruption':
-                flushAudio();
+            case 'response.audio.delta':
+            case 'response.output_audio.delta':
+                if (msg.delta) playChunk(msg.delta);
                 break;
 
-            case 'ping':
-                lastPong = Date.now();
-                if (ws?.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'pong', event_id: msg.ping_event?.event_id }));
-                }
+            case 'error':
+                console.error('[bridge] error:', msg.error);
+                if (msg.error?.message) logError(`Error: ${msg.error.message}`);
                 break;
-
-            case 'agent_response_correction': {
-                const text = msg.agent_response_correction_event?.corrected_text;
-                if (text) updateLastTranslation(text);
-                break;
-            }
 
             default:
                 console.log('[bridge]', msg.type);
@@ -372,74 +362,60 @@
     }
 
     // =========================================================
-    //  MIC CAPTURE
+    //  MIC CAPTURE (24kHz)
     // =========================================================
-    function startMicCapture() {
-        micCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-        srcNode = micCtx.createMediaStreamSource(mediaStream);
+    async function startMicCapture() {
+        if (audioCtx) { try { audioCtx.close(); } catch (_) {} }
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: PCM_RATE });
+        const source = audioCtx.createMediaStreamSource(mediaStream);
+        const proc = audioCtx.createScriptProcessor(4096, 1, 1);
 
-        const bufSize = 4096;
-        procNode = micCtx.createScriptProcessor(bufSize, 1, 1);
-
-        procNode.onaudioprocess = (e) => {
+        proc.onaudioprocess = (e) => {
             if (!active || !ws || ws.readyState !== WebSocket.OPEN) return;
-
             const raw = e.inputBuffer.getChannelData(0);
             const pcm = new Int16Array(raw.length);
             for (let i = 0; i < raw.length; i++) {
                 const s = Math.max(-1, Math.min(1, raw[i]));
                 pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
             }
-
             const bytes = new Uint8Array(pcm.buffer);
             let bin = '';
             for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
-
-            ws.send(JSON.stringify({ user_audio_chunk: btoa(bin) }));
+            ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: btoa(bin) }));
         };
 
-        srcNode.connect(procNode);
-        procNode.connect(micCtx.destination);
+        source.connect(proc);
+        proc.connect(audioCtx.destination);
+        workletNode = proc;
     }
 
     // =========================================================
-    //  AUDIO PLAYBACK
+    //  AUDIO PLAYBACK (24kHz)
     // =========================================================
     function playChunk(b64) {
         if (!playCtx) return;
-
-        if (!agentSpeaking) {
-            agentSpeaking = true;
-            setStatus('speaking', 'Translating\u2026');
-        }
+        if (!agentSpeaking) { agentSpeaking = true; setStatus('speaking', 'Translating\u2026'); }
 
         const bin = atob(b64);
         const raw = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
         const int16 = new Int16Array(raw.buffer);
-
         const f32 = new Float32Array(int16.length);
         for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768;
 
         const buf = playCtx.createBuffer(1, f32.length, PCM_RATE);
         buf.getChannelData(0).set(f32);
-
         const src = playCtx.createBufferSource();
         src.buffer = buf;
         src.connect(playCtx.destination);
 
-        const now = playCtx.currentTime;
-        const t = Math.max(now, nextPlayTime);
+        const t = Math.max(playCtx.currentTime, nextPlayTime);
         src.start(t);
         nextPlayTime = t + buf.duration;
-
         scheduled.push(src);
         src.onended = () => {
             scheduled = scheduled.filter(s => s !== src);
-            if (scheduled.length === 0) {
-                agentSpeaking = false;
-                setStatus('active', 'Listening\u2026');
-            }
+            if (scheduled.length === 0) { agentSpeaking = false; setStatus('active', 'Listening\u2026'); }
         };
     }
 
@@ -451,15 +427,11 @@
     }
 
     // =========================================================
-    //  RECONNECT + WATCHDOG
+    //  RECONNECT
     // =========================================================
     function tryReconnect() {
         if (!active) return;
-        if (reconnects >= MAX_RECONNECTS) {
-            logError('Lost connection. Please restart.');
-            stopSession();
-            return;
-        }
+        if (reconnects >= MAX_RECONNECTS) { logError('Lost connection. Please restart.'); stopSession(); return; }
         reconnects++;
         const delay = Math.min(1000 * 2 ** (reconnects - 1), 8000);
         setStatus('connecting', `Reconnecting in ${delay / 1000}s\u2026`);
@@ -467,34 +439,19 @@
         flushAudio();
         reconnectTimer = setTimeout(async () => {
             if (!active) return;
-            try { await connectAgent(); }
-            catch (_) { tryReconnect(); }
+            try { await connectAgent(); } catch (_) { tryReconnect(); }
         }, delay);
     }
 
-    function startWatchdog() {
-        stopWatchdog();
-        watchdog = setInterval(() => {
-            if (!active || !ws) return;
-            if (Date.now() - lastPong > 30000) {
-                console.warn('Watchdog: no pong in 30s');
-                try { ws.close(); } catch (_) {}
-            }
-        }, 15000);
-    }
-    function stopWatchdog() { if (watchdog) { clearInterval(watchdog); watchdog = null; } }
-
     // =========================================================
-    //  STOP SESSION (agent only — stay in room)
+    //  STOP SESSION (stay in room)
     // =========================================================
     function stopSession() {
         active = false;
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-        stopWatchdog();
         if (ws) { ws.close(); ws = null; }
-        if (procNode)    { procNode.disconnect(); procNode = null; }
-        if (srcNode)     { srcNode.disconnect();  srcNode = null; }
-        if (micCtx)      { micCtx.close();  micCtx = null; }
+        if (workletNode) { workletNode.disconnect(); workletNode = null; }
+        if (audioCtx)    { audioCtx.close(); audioCtx = null; }
         if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
         flushAudio();
         if (playCtx) { playCtx.close(); playCtx = null; }
@@ -517,7 +474,6 @@
 
     function addLocalOriginal(text) {
         showColumnHeaders();
-
         const wrapper = document.createElement('div');
         const tag = document.createElement('div');
         tag.className = 'sender-tag you';
@@ -525,11 +481,9 @@
 
         const row = document.createElement('div');
         row.className = 'b-msg-row';
-
         const left = document.createElement('div');
         left.className = 'b-msg-cell original';
         left.textContent = text;
-
         const right = document.createElement('div');
         right.className = 'b-msg-cell translation empty';
         right.textContent = '\u2026';
@@ -546,10 +500,7 @@
     function fillLocalTranslation(text) {
         if (pendingRow) {
             const cell = pendingRow.querySelector('.b-msg-cell.translation');
-            if (cell) {
-                cell.textContent = text;
-                cell.classList.remove('empty');
-            }
+            if (cell) { cell.textContent = text; cell.classList.remove('empty'); }
             pendingRow = null;
         }
         scrollDown();
@@ -557,7 +508,6 @@
 
     function addRemoteMessage(sourceText, translatedText) {
         showColumnHeaders();
-
         const wrapper = document.createElement('div');
         const tag = document.createElement('div');
         tag.className = 'sender-tag partner';
@@ -565,11 +515,9 @@
 
         const row = document.createElement('div');
         row.className = 'b-msg-row';
-
         const left = document.createElement('div');
         left.className = 'b-msg-cell original';
         left.textContent = sourceText || '';
-
         const right = document.createElement('div');
         right.className = 'b-msg-cell translation';
         right.textContent = translatedText || '';
@@ -580,14 +528,6 @@
         wrapper.appendChild(row);
         $transcript.appendChild(wrapper);
         scrollDown();
-    }
-
-    function updateLastTranslation(text) {
-        const rows = $transcript.querySelectorAll('.b-msg-row');
-        if (rows.length) {
-            const cell = rows[rows.length - 1].querySelector('.b-msg-cell.translation');
-            if (cell) { cell.textContent = text; cell.classList.remove('empty'); }
-        }
     }
 
     function logSystem(text) {
@@ -610,9 +550,6 @@
 
     function scrollDown() { $transcript.scrollTop = $transcript.scrollHeight; }
 
-    // =========================================================
-    //  UI HELPERS
-    // =========================================================
     function setStatus(state, text) {
         $sDot.className = 's-dot ' + state;
         $sText.textContent = text;
