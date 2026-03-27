@@ -53,12 +53,14 @@ module.exports = async (req, res) => {
                     model: 'gpt-4o-realtime-preview',
                     instructions: systemPrompt,
                     audio: {
+                        input: {
+                            transcription: {
+                                model: 'whisper-1',
+                            },
+                        },
                         output: {
                             voice: 'coral',
                         },
-                    },
-                    input_audio_transcription: {
-                        model: 'whisper-1',
                     },
                     turn_detection: {
                         type: 'server_vad',
