@@ -1,38 +1,11 @@
-// Vercel Serverless Function — ElevenLabs TTS proxy
-// ELEVENLABS_API_KEY is set in Vercel environment variables (never in client code)
-
-// ElevenLabs Multilingual v2 voice — "Aria" (warm, natural female)
-// Handles all 16 VoiceBridge languages natively
-const DEFAULT_VOICE_ID = '9BWtsMINqrJLrRacOk9x';
-
-// Map BCP-47 tts codes → ElevenLabs language_code (ISO 639-1 + region)
-// Only needed when the BCP-47 tag differs from what ElevenLabs expects
-const LANG_MAP = {
-    'en-US': 'en',
-    'vi-VN': 'vi',
-    'es-ES': 'es',
-    'fr-FR': 'fr',
-    'de-DE': 'de',
-    'it-IT': 'it',
-    'pt-BR': 'pt',
-    'nl-NL': 'nl',
-    'ru-RU': 'ru',
-    'uk-UA': 'uk',
-    'ar-SA': 'ar',
-    'hi-IN': 'hi',
-    'zh-CN': 'zh',
-    'ja-JP': 'ja',
-    'ko-KR': 'ko',
-    'th-TH': 'th',
-};
+// Vercel Serverless Function — OpenAI TTS proxy
+// OPENAI_API_KEY is set in Vercel environment variables
 
 module.exports = async function handler(req, res) {
-    // Allow GET (browser audio src) and POST (programmatic)
     if (req.method !== 'GET' && req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    // Accept params from query string (GET) or body (POST)
     const params = req.method === 'GET' ? req.query : { ...req.query, ...req.body };
     const { text, lang } = params;
 
@@ -40,50 +13,40 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: 'Missing required params: text, lang' });
     }
 
-    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
         return res.status(503).json({ error: 'TTS not configured on server' });
     }
 
-    const voiceId = DEFAULT_VOICE_ID;
-    const elLang  = LANG_MAP[lang] || lang.slice(0, 2);
+    // Clamp text to 4096 chars (OpenAI TTS limit)
+    const safeText = text.slice(0, 4096);
 
-    // Clamp text to 5000 chars (ElevenLabs limit)
-    const safeText = text.slice(0, 5000);
+    // Pick voice — OpenAI voices: alloy, ash, ballad, coral, echo, fable,
+    // nova, onyx, sage, shimmer. 'nova' is warm and natural.
+    const voice = params.voice || 'nova';
 
     try {
-        const elRes = await fetch(
-            `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-            {
-                method: 'POST',
-                headers: {
-                    'xi-api-key': apiKey,
-                    'Content-Type': 'application/json',
-                    'Accept': 'audio/mpeg',
-                },
-                body: JSON.stringify({
-                    text: safeText,
-                    model_id: 'eleven_flash_v2_5',
-                    language_code: elLang,
-                    voice_settings: {
-                        stability: 0.5,
-                        similarity_boost: 0.75,
-                        style: 0.0,
-                        use_speaker_boost: true,
-                    },
-                }),
-            }
-        );
+        const oaiRes = await fetch('https://api.openai.com/v1/audio/speech', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'tts-1',
+                input: safeText,
+                voice: voice,
+                response_format: 'mp3',
+                speed: 1.0,
+            }),
+        });
 
-        if (!elRes.ok) {
-            const errBody = await elRes.text();
-            let errMsg;
-            try { errMsg = JSON.parse(errBody)?.detail?.message || errBody; } catch { errMsg = errBody; }
-            return res.status(elRes.status).json({ error: errMsg });
+        if (!oaiRes.ok) {
+            const errBody = await oaiRes.text();
+            return res.status(oaiRes.status).json({ error: errBody });
         }
 
-        // Stream the MP3 audio back to the client
-        const arrayBuffer = await elRes.arrayBuffer();
+        const arrayBuffer = await oaiRes.arrayBuffer();
         const audioBuffer = Buffer.from(arrayBuffer);
 
         res.setHeader('Content-Type', 'audio/mpeg');
