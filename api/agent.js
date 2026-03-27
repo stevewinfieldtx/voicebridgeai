@@ -51,8 +51,10 @@ module.exports = async (req, res) => {
 
     try {
         // Step 1: Check for pre-configured agent in env vars
-        // e.g. ELEVENLABS_AGENT_EN_VI=agentIdHere
-        const envKey = `ELEVENLABS_AGENT_${from.toUpperCase()}_${to.toUpperCase()}`;
+        // One agent per language pair (bidirectional), sorted alphabetically
+        // e.g. ELEVENLABS_AGENT_EN_VI covers both en→vi and vi→en
+        const sorted = [from, to].sort();
+        const envKey = `ELEVENLABS_AGENT_${sorted[0].toUpperCase()}_${sorted[1].toUpperCase()}`;
         let agentId = process.env[envKey] || null;
 
         // Step 2: Fall back to dynamic creation if no env var
