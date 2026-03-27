@@ -49,7 +49,7 @@ module.exports = async (req, res) => {
             },
             body: JSON.stringify({
                 model: 'gpt-4o-realtime-preview',
-                voice: 'nova',
+                voice: 'coral',
                 instructions: systemPrompt,
                 input_audio_transcription: {
                     model: 'whisper-1',
