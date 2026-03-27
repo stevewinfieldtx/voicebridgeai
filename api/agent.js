@@ -40,25 +40,32 @@ module.exports = async (req, res) => {
     const systemPrompt = buildPrompt(langA, langB);
 
     try {
-        // Request ephemeral client secret from OpenAI
-        const resp = await fetch('https://api.openai.com/v1/realtime/sessions', {
+        // Request ephemeral client secret from OpenAI (GA endpoint)
+        const resp = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${API_KEY}`,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                model: 'gpt-4o-realtime-preview',
-                voice: 'nova',
-                instructions: systemPrompt,
-                input_audio_transcription: {
-                    model: 'whisper-1',
-                },
-                turn_detection: {
-                    type: 'server_vad',
-                    threshold: 0.5,
-                    prefix_padding_ms: 300,
-                    silence_duration_ms: 500,
+                session: {
+                    type: 'realtime',
+                    model: 'gpt-4o-realtime-preview',
+                    instructions: systemPrompt,
+                    audio: {
+                        output: {
+                            voice: 'coral',
+                        },
+                    },
+                    input_audio_transcription: {
+                        model: 'whisper-1',
+                    },
+                    turn_detection: {
+                        type: 'server_vad',
+                        threshold: 0.5,
+                        prefix_padding_ms: 300,
+                        silence_duration_ms: 500,
+                    },
                 },
             }),
         });
@@ -71,7 +78,7 @@ module.exports = async (req, res) => {
         const data = await resp.json();
 
         return res.json({
-            ephemeralKey: data.client_secret?.value || data.client_secret,
+            ephemeralKey: data.value || data.client_secret?.value || data.client_secret,
             model: 'gpt-4o-realtime-preview',
             from,
             to,
