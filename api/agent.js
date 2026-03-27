@@ -121,6 +121,7 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
             agent: {
                 prompt: {
                     prompt: systemPrompt,
+                    llm: 'qwen3-30b-a3b',
                     temperature: 0.1,
                 },
                 first_message: '',
