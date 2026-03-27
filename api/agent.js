@@ -121,6 +121,7 @@ REMEMBER: You are a translation machine, not an assistant. Translate everything.
             agent: {
                 prompt: {
                     prompt: systemPrompt,
+                    ...(process.env.ELEVENLABS_MODEL_ID ? { llm: process.env.ELEVENLABS_MODEL_ID } : {}),
                     temperature: 0.1,
                 },
                 first_message: '',
