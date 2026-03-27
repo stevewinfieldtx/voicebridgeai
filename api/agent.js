@@ -1,13 +1,11 @@
 /* =========================================
-   TalkBridge — ElevenLabs Agent API
+   TalkBridge — OpenAI Realtime Token API
    GET /api/agent?from=en&to=vi
 
-   Looks up a pre-configured agent by language pair
-   from env vars (e.g. ELEVENLABS_AGENT_EN_VI).
-   All agent config (LLM, voice, prompt) is managed
-   in the ElevenLabs dashboard — not in code.
-
-   Falls back to dynamic creation if no env var exists.
+   Returns an ephemeral token for the OpenAI
+   Realtime API + the translation system prompt.
+   All voice config happens client-side via
+   session.update — no server-side agent needed.
    ========================================= */
 
 const LANG = {
@@ -17,27 +15,17 @@ const LANG = {
     zh: 'Chinese', ja: 'Japanese',   ko: 'Korean',  th: 'Thai',
 };
 
-// Fallback: in-memory cache for dynamically created agents
-const agentCache = {};
-const CACHE_TTL = 30 * 60 * 1000;
-
-const VOICES = {
-    male:   'nPczCjzI2devNBz1zQrb',
-    female: 'EXAVITQu4vr4xnSDxMaL',
-};
-
 module.exports = async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     if (req.method === 'OPTIONS') return res.status(204).end();
 
-    const API_KEY = process.env.ELEVENLABS_API_KEY;
-    if (!API_KEY) return res.status(500).json({ error: 'ELEVENLABS_API_KEY not set' });
+    const API_KEY = process.env.OPENAI_API_KEY;
+    if (!API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY not set' });
 
-    const from   = req.query.from || 'en';
-    const to     = req.query.to   || 'vi';
-    const gender = req.query.gender === 'male' ? 'male' : 'female';
+    const from = req.query.from || 'en';
+    const to   = req.query.to   || 'vi';
 
     if (!LANG[from] || !LANG[to]) {
         return res.status(400).json({ error: 'Unsupported language code' });
@@ -49,44 +37,55 @@ module.exports = async (req, res) => {
     const langA = LANG[from];
     const langB = LANG[to];
 
-    try {
-        // Step 1: Check for pre-configured agent in env vars
-        // One agent per language pair (bidirectional), sorted alphabetically
-        // e.g. ELEVENLABS_AGENT_EN_VI covers both en→vi and vi→en
-        const sorted = [from, to].sort();
-        const envKey = `ELEVENLABS_AGENT_${sorted[0].toUpperCase()}_${sorted[1].toUpperCase()}`;
-        let agentId = process.env[envKey] || null;
+    const systemPrompt = buildPrompt(langA, langB);
 
-        // Step 2: Fall back to dynamic creation if no env var
-        if (!agentId) {
-            const cacheKey = `${from}|${to}|${gender}`;
-            agentId = getCached(cacheKey);
-            if (!agentId) {
-                agentId = await createAgent(API_KEY, from, to, langA, langB, VOICES[gender]);
-                agentCache[cacheKey] = { agentId, ts: Date.now() };
-            }
+    try {
+        // Request ephemeral client secret from OpenAI
+        const resp = await fetch('https://api.openai.com/v1/realtime/sessions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o-realtime-preview',
+                voice: 'nova',
+                instructions: systemPrompt,
+                input_audio_transcription: {
+                    model: 'whisper-1',
+                },
+                turn_detection: {
+                    type: 'server_vad',
+                    threshold: 0.5,
+                    prefix_padding_ms: 300,
+                    silence_duration_ms: 500,
+                },
+            }),
+        });
+
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(`OpenAI session failed (${resp.status}): ${text}`);
         }
 
-        const signedUrl = await getSignedUrl(API_KEY, agentId);
-        return res.json({ agentId, signedUrl, from, to, languages: { a: langA, b: langB } });
+        const data = await resp.json();
+
+        return res.json({
+            ephemeralKey: data.client_secret?.value || data.client_secret,
+            model: 'gpt-4o-realtime-preview',
+            from,
+            to,
+            languages: { a: langA, b: langB },
+            systemPrompt,
+        });
     } catch (err) {
         console.error('Agent API error:', err);
-        // Clear dynamic cache on error
-        const cacheKey = `${from}|${to}|${gender}`;
-        delete agentCache[cacheKey];
-        return res.status(500).json({ error: err.message || 'Failed to create agent' });
+        return res.status(500).json({ error: err.message || 'Failed to create session' });
     }
 };
 
-function getCached(key) {
-    const c = agentCache[key];
-    if (!c) return null;
-    if (Date.now() - c.ts > CACHE_TTL) { delete agentCache[key]; return null; }
-    return c.agentId;
-}
-
-async function createAgent(apiKey, fromCode, toCode, langA, langB, voiceId) {
-    const systemPrompt = `ROLE: Translation Machine
+function buildPrompt(langA, langB) {
+    return `ROLE: Translation Machine
 TYPE: Strict bidirectional voice translator
 PAIR: ${langA} ↔ ${langB}
 MODE: Translate only. Never converse.
@@ -130,52 +129,4 @@ User: [silence]
 You: [silence — say absolutely nothing]
 
 REMEMBER: You are a translation machine, not an assistant. Translate everything. Answer nothing. Add nothing.`;
-
-    const body = {
-        name: `TalkBridge TX: ${langA} ↔ ${langB}`,
-        conversation_config: {
-            agent: {
-                prompt: {
-                    prompt: systemPrompt,
-                    temperature: 0.1,
-                },
-                first_message: '',
-                language: fromCode,
-            },
-            turn: {
-                mode: 'turn',
-                turn_timeout: 3,
-                silence_end_call_timeout: 600,
-            },
-            tts: {
-                voice_id: voiceId,
-                optimize_streaming_latency: 4,
-            },
-        },
-    };
-
-    const resp = await fetch('https://api.elevenlabs.io/v1/convai/agents/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'xi-api-key': apiKey },
-        body: JSON.stringify(body),
-    });
-
-    if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(`ElevenLabs create agent failed (${resp.status}): ${text}`);
-    }
-
-    return (await resp.json()).agent_id;
-}
-
-async function getSignedUrl(apiKey, agentId) {
-    const resp = await fetch(
-        `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`,
-        { headers: { 'xi-api-key': apiKey } }
-    );
-    if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(`Signed URL failed (${resp.status}): ${text}`);
-    }
-    return (await resp.json()).signed_url;
 }
