@@ -367,6 +367,8 @@
 
         proc.onaudioprocess = (e) => {
             if (!active || !ws || ws.readyState !== WebSocket.OPEN) return;
+            // Mute mic while agent is speaking to prevent echo loop
+            if (agentSpeaking) return;
             const raw = e.inputBuffer.getChannelData(0);
             const pcm = new Int16Array(raw.length);
             for (let i = 0; i < raw.length; i++) {
