@@ -154,19 +154,12 @@
             $startBtn.querySelector('.btn-label').textContent = 'Stop';
             $startBtn.classList.add('active');
 
-            // Configure the session
+            // Configure the session (transcription + VAD already set via client_secrets)
             ws.send(JSON.stringify({
                 type: 'session.update',
                 session: {
                     type: 'realtime',
                     instructions: sessionPrompt,
-                    input_audio_transcription: { model: 'whisper-1' },
-                    turn_detection: {
-                        type: 'server_vad',
-                        threshold: 0.5,
-                        prefix_padding_ms: 300,
-                        silence_duration_ms: 500,
-                    },
                 },
             }));
 
